@@ -7,10 +7,6 @@
 ├── app
 ├── datasets
 ├── make_dataset
-│   ├── backgrounds
-│   └── signs
-│       ├── images
-│       └── signs.csv
 ├── models
 └── training
 ```
