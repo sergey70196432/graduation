@@ -1,1 +1,14 @@
 .python-version
+__pycache__
+.venv
+.deps
+/test
+
+.DS_Store
+
+datasets/*
+!datasets/.gitkeep
+
+models/*
+!models/.gitkeep
+
