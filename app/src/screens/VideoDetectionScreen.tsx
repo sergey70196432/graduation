@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import DocumentPicker from 'react-native-document-picker';
@@ -91,6 +92,13 @@ function humanizeVideoOpenError(err: unknown): string {
 
 export function VideoDetectionScreen(props: { onBack?: () => void }) {
   const insets = useSafeAreaInsets();
+  const { width: windowW, height: windowH } = useWindowDimensions();
+  const isLandscape = windowW > windowH;
+  const sidePanelWidth = useMemo(() => {
+    if (!isLandscape) return undefined;
+    const w = Math.round(windowW * 0.34);
+    return Math.max(280, Math.min(380, w));
+  }, [isLandscape, windowW]);
 
   const [model, setModel] = useState<TensorflowModel | null>(null);
   const [labels, setLabels] = useState<string[]>([]);
@@ -421,151 +429,163 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
         </View>
       </SafeAreaView>
 
-      <View
-        style={styles.preview}
-        onLayout={e => {
-          const { width, height } = e.nativeEvent.layout;
-          setViewSize({ width, height });
-        }}
-      >
-        {videoUri ? (
-          <>
-            <Video
-              source={{ uri: videoUri }}
-              style={StyleSheet.absoluteFill}
-              resizeMode="contain"
-              paused={!isPlaying}
-              controls={true}
-              onProgress={p => {
-                // react-native-video отдаёт секунды
-                setVideoPositionMs(p.currentTime * 1000);
-              }}
-              onError={e => {
-                setProcessingError(`Video error: ${JSON.stringify(e)}`);
-              }}
-            />
-            <DetectionOverlay
-              detections={detections}
-              frameSize={frameSize}
-              viewSize={viewSize}
-            />
-          </>
-        ) : (
-          <View style={styles.center}>
-            <Text style={styles.title}>Тест по видео</Text>
-            <Text style={styles.text}>
-              Выбери видео с телефона, затем нажми "Infer frame".
+      <View style={[styles.content, isLandscape && styles.contentLandscape]}>
+        <View
+          style={styles.preview}
+          onLayout={e => {
+            const { width, height } = e.nativeEvent.layout;
+            setViewSize({ width, height });
+          }}
+        >
+          {videoUri ? (
+            <>
+              <Video
+                source={{ uri: videoUri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="contain"
+                paused={!isPlaying}
+                controls={true}
+                onProgress={p => {
+                  // react-native-video отдаёт секунды
+                  setVideoPositionMs(p.currentTime * 1000);
+                }}
+                onError={e => {
+                  setProcessingError(`Video error: ${JSON.stringify(e)}`);
+                }}
+              />
+              <DetectionOverlay
+                detections={detections}
+                frameSize={frameSize}
+                viewSize={viewSize}
+              />
+            </>
+          ) : (
+            <View style={styles.center}>
+              <Text style={styles.title}>Тест по видео</Text>
+              <Text style={styles.text}>
+                Выбери видео с телефона, затем нажми "Infer frame".
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View
+          style={[
+            styles.panel,
+            isLandscape ? styles.panelLandscape : styles.panelPortrait,
+            isLandscape ? { width: sidePanelWidth } : null,
+            {
+              paddingBottom: Math.max(insets.bottom, 12),
+              paddingRight: Math.max(insets.right, 12),
+            },
+          ]}
+        >
+          {isLoadingModel && (
+            <View style={styles.loadingInline}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.loadingInlineText}>Загружаю модель…</Text>
+            </View>
+          )}
+
+          {modelError && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Модель не загрузилась</Text>
+              <Text style={styles.errorText}>{modelError}</Text>
+            </View>
+          )}
+
+          <View style={styles.metrics}>
+            <Metric label="Video" value={videoUri ? 'selected' : '—'} />
+            <Metric label="t, ms" value={String(Math.round(videoPositionMs))} />
+            <Metric label="Infer, ms" value={lastInferenceMs.toFixed(1)} />
+            <Metric label="Objects" value={String(detections.length)} />
+          </View>
+
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onTogglePlay}
+              disabled={!videoUri}
+            >
+              <Text style={styles.buttonText}>{isPlaying ? 'Pause' : 'Play'}</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onToggleAutoInfer}
+              disabled={!videoUri || !model || labels.length === 0}
+            >
+              <Text style={styles.buttonText}>
+                Auto infer: {autoInferEnabled ? 'ON' : 'OFF'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onCycleAutoInferFps}
+              disabled={!autoInferEnabled}
+            >
+              <Text style={styles.buttonText}>FPS: {autoInferFps}</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onPickVideoFromFiles}
+            >
+              <Text style={styles.buttonText}>Pick (Files)</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.button,
+                pressed && styles.buttonPressed,
+                !canInfer && styles.buttonDisabled,
+              ]}
+              onPress={onInferCurrentFrame}
+              disabled={!canInfer}
+            >
+              <Text style={styles.buttonText}>
+                {isProcessing ? 'Processing…' : 'Infer frame'}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onPrev}
+              disabled={!videoUri}
+            >
+              <Text style={styles.buttonText}>-0.5s</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onNext}
+              disabled={!videoUri}
+            >
+              <Text style={styles.buttonText}>+0.5s</Text>
+            </Pressable>
+          </View>
+
+          {processingError && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Ошибка</Text>
+              <Text style={styles.errorText}>{processingError}</Text>
+            </View>
+          )}
+
+          {thumb && (
+            <Text style={styles.hint}>
+              Thumb: {thumb.width}x{thumb.height}
             </Text>
-          </View>
-        )}
-      </View>
-
-      <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        {isLoadingModel && (
-          <View style={styles.loadingInline}>
-            <ActivityIndicator color="#fff" size="small" />
-            <Text style={styles.loadingInlineText}>Загружаю модель…</Text>
-          </View>
-        )}
-
-        {modelError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Модель не загрузилась</Text>
-            <Text style={styles.errorText}>{modelError}</Text>
-          </View>
-        )}
-
-        <View style={styles.metrics}>
-          <Metric label="Video" value={videoUri ? 'selected' : '—'} />
-          <Metric label="t, ms" value={String(Math.round(videoPositionMs))} />
-          <Metric label="Infer, ms" value={lastInferenceMs.toFixed(1)} />
-          <Metric label="Objects" value={String(detections.length)} />
+          )}
         </View>
-
-        <View style={[styles.row, styles.rowMt10]}>
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onTogglePlay}
-            disabled={!videoUri}
-          >
-            <Text style={styles.buttonText}>{isPlaying ? 'Pause' : 'Play'}</Text>
-          </Pressable>
-        </View>
-
-        <View style={[styles.row, styles.rowMt10]}>
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onToggleAutoInfer}
-            disabled={!videoUri || !model || labels.length === 0}
-          >
-            <Text style={styles.buttonText}>
-              Auto infer: {autoInferEnabled ? 'ON' : 'OFF'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onCycleAutoInferFps}
-            disabled={!autoInferEnabled}
-          >
-            <Text style={styles.buttonText}>FPS: {autoInferFps}</Text>
-          </Pressable>
-        </View>
-
-        <View style={[styles.row, styles.rowMt10]}>
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onPickVideoFromFiles}
-          >
-            <Text style={styles.buttonText}>Pick (Files)</Text>
-          </Pressable>
-        </View>
-
-        <View style={[styles.row, styles.rowMt10]}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.button,
-              pressed && styles.buttonPressed,
-              !canInfer && styles.buttonDisabled,
-            ]}
-            onPress={onInferCurrentFrame}
-            disabled={!canInfer}
-          >
-            <Text style={styles.buttonText}>
-              {isProcessing ? 'Processing…' : 'Infer frame'}
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={[styles.row, styles.rowMt10]}>
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onPrev}
-            disabled={!videoUri}
-          >
-            <Text style={styles.buttonText}>-0.5s</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onNext}
-            disabled={!videoUri}
-          >
-            <Text style={styles.buttonText}>+0.5s</Text>
-          </Pressable>
-        </View>
-
-        {processingError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Ошибка</Text>
-            <Text style={styles.errorText}>{processingError}</Text>
-          </View>
-        )}
-
-        {thumb && (
-          <Text style={styles.hint}>
-            Thumb: {thumb.width}x{thumb.height}
-          </Text>
-        )}
       </View>
     </View>
   );
@@ -600,13 +620,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   smallButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  content: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  contentLandscape: {
+    flexDirection: 'row',
+  },
   preview: { flex: 1, backgroundColor: '#000' },
   panel: {
     backgroundColor: 'rgba(15, 15, 18, 0.95)',
     paddingHorizontal: 12,
     paddingTop: 10,
+  },
+  panelPortrait: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.15)',
+  },
+  panelLandscape: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(255,255,255,0.15)',
   },
   row: {
     flexDirection: 'row',

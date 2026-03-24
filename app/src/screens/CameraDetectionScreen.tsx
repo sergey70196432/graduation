@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -19,6 +20,13 @@ import type { FrameSize } from '../types/detection';
 
 export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
   const insets = useSafeAreaInsets();
+  const { width: windowW, height: windowH } = useWindowDimensions();
+  const isLandscape = windowW > windowH;
+  const sidePanelWidth = useMemo(() => {
+    if (!isLandscape) return undefined;
+    const w = Math.round(windowW * 0.34);
+    return Math.max(280, Math.min(380, w));
+  }, [isLandscape, windowW]);
   const { hasPermission, requestPermission } = useCameraPermission();
 
   const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>(
@@ -103,98 +111,110 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
 
   return (
     <View style={styles.root}>
-      <View style={styles.preview} onLayout={onPreviewLayout}>
-        {canShowCamera ? (
-          <>
-            <Camera
-              style={StyleSheet.absoluteFill}
-              device={device}
-              isActive={true}
-              frameProcessor={frameProcessor}
-              resizeMode="contain"
-            />
+      <View style={[styles.content, isLandscape && styles.contentLandscape]}>
+        <View style={styles.preview} onLayout={onPreviewLayout}>
+          {canShowCamera ? (
+            <>
+              <Camera
+                style={StyleSheet.absoluteFill}
+                device={device}
+                isActive={true}
+                frameProcessor={frameProcessor}
+                resizeMode="contain"
+              />
 
-            <DetectionOverlay
-              detections={detections}
-              frameSize={frameSize}
-              viewSize={previewSize}
-            />
-          </>
-        ) : !hasPermission ? (
-          permissionUi
-        ) : (
-          noDeviceUi
-        )}
-      </View>
-
-      <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <View style={styles.row}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.button,
-              isDetecting ? styles.buttonStop : styles.buttonStart,
-              pressed && styles.buttonPressed,
-              (!isModelLoaded || !canShowCamera) && styles.buttonDisabled,
-            ]}
-            onPress={onToggleDetection}
-            disabled={!isModelLoaded || !canShowCamera}
-          >
-            <Text style={styles.buttonText}>
-              {isDetecting ? 'Stop detection' : 'Start detection'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={onSwitchCamera}
-            disabled={!canShowCamera}
-          >
-            <Text style={styles.buttonText}>Switch camera</Text>
-          </Pressable>
+              <DetectionOverlay
+                detections={detections}
+                frameSize={frameSize}
+                viewSize={previewSize}
+              />
+            </>
+          ) : !hasPermission ? (
+            permissionUi
+          ) : (
+            noDeviceUi
+          )}
         </View>
 
-              <View style={[styles.row, styles.rowMt10]}>
-                <Pressable
-                  style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-                  onPress={onOpenVideoTest}
-                >
-                  <Text style={styles.buttonText}>Load video (test)</Text>
-                </Pressable>
-              </View>
+        <View
+          style={[
+            styles.panel,
+            isLandscape ? styles.panelLandscape : styles.panelPortrait,
+            isLandscape ? { width: sidePanelWidth } : null,
+            {
+              paddingBottom: Math.max(insets.bottom, 12),
+              paddingRight: Math.max(insets.right, 12),
+            },
+          ]}
+        >
+          <View style={styles.row}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.button,
+                isDetecting ? styles.buttonStop : styles.buttonStart,
+                pressed && styles.buttonPressed,
+                (!isModelLoaded || !canShowCamera) && styles.buttonDisabled,
+              ]}
+              onPress={onToggleDetection}
+              disabled={!isModelLoaded || !canShowCamera}
+            >
+              <Text style={styles.buttonText}>
+                {isDetecting ? 'Stop detection' : 'Start detection'}
+              </Text>
+            </Pressable>
 
-        {modelState === 'loading' && (
-          <View style={styles.loadingInline}>
-            <ActivityIndicator color="#fff" size="small" />
-            <Text style={styles.loadingInlineText}>Загружаю модель…</Text>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onSwitchCamera}
+              disabled={!canShowCamera}
+            >
+              <Text style={styles.buttonText}>Switch camera</Text>
+            </Pressable>
           </View>
-        )}
 
-        <View style={styles.metrics}>
-          <Metric label="FPS" value={stats.fps.toFixed(1)} />
-          <Metric label="Inference, ms" value={stats.lastInferenceMs.toFixed(1)} />
-          <Metric label="Objects" value={String(stats.lastNumDetections)} />
-          <Metric label="Input" value={`${stats.inputSize}x${stats.inputSize}`} />
+          <View style={[styles.row, styles.rowMt10]}>
+            <Pressable
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+              onPress={onOpenVideoTest}
+            >
+              <Text style={styles.buttonText}>Load video (test)</Text>
+            </Pressable>
+          </View>
+
+          {modelState === 'loading' && (
+            <View style={styles.loadingInline}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.loadingInlineText}>Загружаю модель…</Text>
+            </View>
+          )}
+
+          <View style={styles.metrics}>
+            <Metric label="FPS" value={stats.fps.toFixed(1)} />
+            <Metric label="Inference, ms" value={stats.lastInferenceMs.toFixed(1)} />
+            <Metric label="Objects" value={String(stats.lastNumDetections)} />
+            <Metric label="Input" value={`${stats.inputSize}x${stats.inputSize}`} />
+          </View>
+
+          {modelState === 'error' && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Модель не загрузилась</Text>
+              <Text style={styles.errorText}>
+                Проверь, что файл модели реально лежит в `app/assets/models/` и не пустой.
+                {'\n\n'}
+                {modelErrorMessage ?? 'Нет текста ошибки.'}
+              </Text>
+            </View>
+          )}
+
+          {lastLogFilePath && (
+            <View style={styles.hintBox}>
+              <Text style={styles.hintTitle}>Логи сохранены</Text>
+              <Text style={styles.hintText} numberOfLines={2}>
+                {lastLogFilePath}
+              </Text>
+            </View>
+          )}
         </View>
-
-        {modelState === 'error' && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Модель не загрузилась</Text>
-            <Text style={styles.errorText}>
-              Проверь, что файл модели реально лежит в `app/assets/models/` и не пустой.
-              {'\n\n'}
-              {modelErrorMessage ?? 'Нет текста ошибки.'}
-            </Text>
-          </View>
-        )}
-
-        {lastLogFilePath && (
-          <View style={styles.hintBox}>
-            <Text style={styles.hintTitle}>Логи сохранены</Text>
-            <Text style={styles.hintText} numberOfLines={2}>
-              {lastLogFilePath}
-            </Text>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -214,6 +234,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
+  content: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  contentLandscape: {
+    flexDirection: 'row',
+  },
   preview: {
     flex: 1,
     backgroundColor: '#000',
@@ -222,8 +249,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 15, 18, 0.95)',
     paddingHorizontal: 12,
     paddingTop: 10,
+  },
+  panelPortrait: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.15)',
+  },
+  panelLandscape: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(255,255,255,0.15)',
   },
   row: {
     flexDirection: 'row',
