@@ -1,0 +1,290 @@
+diff --git a/node_modules/react-native-fast-tflite/ios/Tflite.mm b/node_modules/react-native-fast-tflite/ios/Tflite.mm
+index c76d3fa..4ff6e0a 100644
+--- a/node_modules/react-native-fast-tflite/ios/Tflite.mm
++++ b/node_modules/react-native-fast-tflite/ios/Tflite.mm
+@@ -1,57 +1,55 @@
+ #import "Tflite.h"
+ #import "../cpp/TensorflowPlugin.h"
+ #import <React-callinvoker/ReactCommon/CallInvoker.h>
+-#import <React/RCTBridge+Private.h>
++#import <ReactCommon/RCTTurboModuleWithJSIBindings.h>
+ #import <jsi/jsi.h>
++#import <atomic>
+ #import <string>
+ 
+-// This is defined in RCTTurboModule.h.
+-// for future versions of React we might need to figure out another approach to get the
+-// JSCallInvoker!
+-@interface RCTBridge (RCTTurboModule)
+-- (std::shared_ptr<facebook::react::CallInvoker>)jsCallInvoker;
+-@end
+-
+ using namespace facebook;
+ 
++static std::atomic_bool gInstalled{false};
++
++@interface Tflite () <RCTTurboModuleWithJSIBindings>
++@end
++
+ @implementation Tflite
+ RCT_EXPORT_MODULE(Tflite)
+ 
+ - (NSNumber *)install {
+-  RCTBridge* bridge = [RCTBridge currentBridge];
+-  RCTCxxBridge* cxxBridge = (RCTCxxBridge*)bridge;
+-  if (!cxxBridge.runtime) {
+-    return @(false);
+-  }
+-  jsi::Runtime& runtime = *(jsi::Runtime*)cxxBridge.runtime;
++  // В bridgeless режиме `RCTBridge currentBridge` может быть nil, поэтому установка идёт через
++  // официальный хук `RCTTurboModuleWithJSIBindings` (см. installJSIBindingsWithRuntime:callInvoker:).
++  return @(gInstalled.load());
++}
++
++// Don't compile this code when we build for the old architecture.
++#ifdef RCT_NEW_ARCH_ENABLED
++- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
++    (const facebook::react::ObjCTurboModule::InitParams&)params {
++  return std::make_shared<facebook::react::NativeRNTfliteSpecJSI>(params);
++}
++#endif
+ 
++- (void)installJSIBindingsWithRuntime:(jsi::Runtime &)runtime
++                          callInvoker:(const std::shared_ptr<react::CallInvoker> &)callInvoker {
+   auto fetchByteDataFromUrl = [](std::string url) {
+-    NSString* string = [NSString stringWithUTF8String:url.c_str()];
++    NSString *string = [NSString stringWithUTF8String:url.c_str()];
+     NSLog(@"Fetching %@...", string);
+-    NSURL* nsURL = [NSURL URLWithString:string];
+-    NSData* contents = [NSData dataWithContentsOfURL:nsURL];
++    NSURL *nsURL = [NSURL URLWithString:string];
++    NSData *contents = [NSData dataWithContentsOfURL:nsURL];
+ 
+-    void* data = malloc(contents.length * sizeof(uint8_t));
++    void *data = malloc(contents.length * sizeof(uint8_t));
+     memcpy(data, contents.bytes, contents.length);
+     return Buffer{.data = data, .size = contents.length};
+   };
+ 
+   try {
+-    TensorflowPlugin::installToRuntime(runtime, [bridge jsCallInvoker], fetchByteDataFromUrl);
+-  } catch (std::exception& exc) {
++    TensorflowPlugin::installToRuntime(runtime, callInvoker, fetchByteDataFromUrl);
++    gInstalled.store(true);
++  } catch (std::exception &exc) {
+     NSLog(@"Failed to install TensorFlow Lite plugin to Runtime! %s", exc.what());
+-    return @(false);
++    gInstalled.store(false);
+   }
+-
+-  return @(true);
+-}
+-
+-// Don't compile this code when we build for the old architecture.
+-#ifdef RCT_NEW_ARCH_ENABLED
+-- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
+-    (const facebook::react::ObjCTurboModule::InitParams&)params {
+-  return std::make_shared<facebook::react::NativeRNTfliteSpecJSI>(params);
+ }
+-#endif
+ 
+ @end
+diff --git a/node_modules/react-native-fast-tflite/lib/commonjs/TensorflowLite.js b/node_modules/react-native-fast-tflite/lib/commonjs/TensorflowLite.js
+index 23129af..e3ec827 100644
+--- a/node_modules/react-native-fast-tflite/lib/commonjs/TensorflowLite.js
++++ b/node_modules/react-native-fast-tflite/lib/commonjs/TensorflowLite.js
+@@ -8,11 +8,22 @@ exports.useTensorflowModel = useTensorflowModel;
+ var _react = require("react");
+ var _reactNative = require("react-native");
+ var _TensorflowModule = require("./TensorflowModule");
+-// Installs the JSI bindings into the global namespace.
+-console.log('Installing bindings...');
+-const result = _TensorflowModule.TensorflowModule.install();
+-if (result !== true) console.error('Failed to install Tensorflow Lite bindings!');
+-console.log('Successfully installed!');
++async function ensureBindingsInstalled(options) {
++  const maxAttempts = (options === null || options === void 0 ? void 0 : options.maxAttempts) ?? 30;
++  const retryDelayMs = (options === null || options === void 0 ? void 0 : options.retryDelayMs) ?? 50;
++  if (typeof global.__loadTensorflowModel === 'function') return;
++  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++    try {
++      const ok = _TensorflowModule.TensorflowModule.install();
++      if (ok === true && typeof global.__loadTensorflowModel === 'function') return;
++    } catch (_e) {
++      // ignore and retry
++    }
++    // даём RN и JSI runtime время подняться
++    await new Promise(resolve => setTimeout(resolve, retryDelayMs));
++  }
++  throw new Error('TFLite: не удалось установить JSI bindings (global.__loadTensorflowModel отсутствует). ' + 'Чаще всего это значит, что install() вызвался слишком рано или iOS runtime ещё не готов.');
++}
+ 
+ // In React Native, `require(..)` returns a number.
+ // ReturnType<typeof require>
+@@ -29,6 +40,11 @@ console.log('Successfully installed!');
+  */
+ function loadTensorflowModel(source) {
+   let delegate = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'default';
++  return loadTensorflowModelImpl(source, delegate);
++}
++
++async function loadTensorflowModelImpl(source, delegate) {
++  await ensureBindingsInstalled();
+   let uri;
+   if (typeof source === 'number') {
+     console.log(`Loading Tensorflow Lite Model ${source}`);
+diff --git a/node_modules/react-native-fast-tflite/lib/module/TensorflowLite.js b/node_modules/react-native-fast-tflite/lib/module/TensorflowLite.js
+index 1b3a2a4..e2097bd 100644
+--- a/node_modules/react-native-fast-tflite/lib/module/TensorflowLite.js
++++ b/node_modules/react-native-fast-tflite/lib/module/TensorflowLite.js
+@@ -1,11 +1,25 @@
+ import { useEffect, useState } from 'react';
+ import { Image } from 'react-native';
+ import { TensorflowModule } from './TensorflowModule';
+-// Installs the JSI bindings into the global namespace.
+-console.log('Installing bindings...');
+-const result = TensorflowModule.install();
+-if (result !== true) console.error('Failed to install Tensorflow Lite bindings!');
+-console.log('Successfully installed!');
++async function ensureBindingsInstalled(options) {
++  const maxAttempts = (options?.maxAttempts) ?? 30;
++  const retryDelayMs = (options?.retryDelayMs) ?? 50;
++  if (typeof global.__loadTensorflowModel === 'function') return;
++  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++    try {
++      const ok = TensorflowModule.install();
++      if (ok === true && typeof global.__loadTensorflowModel === 'function') return;
++    } catch {
++      // ignore and retry
++    }
++    // даём RN и JSI runtime время подняться
++    await new Promise(resolve => setTimeout(resolve, retryDelayMs));
++  }
++  throw new Error(
++    'TFLite: не удалось установить JSI bindings (global.__loadTensorflowModel отсутствует). ' +
++      'Чаще всего это значит, что install() вызвался слишком рано или iOS runtime ещё не готов.'
++  );
++}
+ 
+ // In React Native, `require(..)` returns a number.
+ // ReturnType<typeof require>
+@@ -22,6 +36,11 @@ console.log('Successfully installed!');
+  */
+ export function loadTensorflowModel(source) {
+   let delegate = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'default';
++  return loadTensorflowModelImpl(source, delegate);
++}
++
++async function loadTensorflowModelImpl(source, delegate) {
++  await ensureBindingsInstalled();
+   let uri;
+   if (typeof source === 'number') {
+     console.log(`Loading Tensorflow Lite Model ${source}`);
+diff --git a/node_modules/react-native-fast-tflite/lib/src/TensorflowLite.js b/node_modules/react-native-fast-tflite/lib/src/TensorflowLite.js
+index 33c314f..e24fc7a 100644
+--- a/node_modules/react-native-fast-tflite/lib/src/TensorflowLite.js
++++ b/node_modules/react-native-fast-tflite/lib/src/TensorflowLite.js
+@@ -1,12 +1,26 @@
+ import { useEffect, useState } from 'react';
+ import { Image } from 'react-native';
+ import { TensorflowModule } from './TensorflowModule';
+-// Installs the JSI bindings into the global namespace.
+-console.log('Installing bindings...');
+-const result = TensorflowModule.install();
+-if (result !== true)
+-    console.error('Failed to install Tensorflow Lite bindings!');
+-console.log('Successfully installed!');
++async function ensureBindingsInstalled(options) {
++    const maxAttempts = (options === null || options === void 0 ? void 0 : options.maxAttempts) ?? 30;
++    const retryDelayMs = (options === null || options === void 0 ? void 0 : options.retryDelayMs) ?? 50;
++    if (typeof global.__loadTensorflowModel === 'function')
++        return;
++    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++        try {
++            const ok = TensorflowModule.install();
++            if (ok === true && typeof global.__loadTensorflowModel === 'function')
++                return;
++        }
++        catch {
++            // ignore and retry
++        }
++        // даём RN и JSI runtime время подняться
++        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
++    }
++    throw new Error('TFLite: не удалось установить JSI bindings (global.__loadTensorflowModel отсутствует). ' +
++        'Чаще всего это значит, что install() вызвался слишком рано или iOS runtime ещё не готов.');
++}
+ /**
+  * Load a Tensorflow Lite Model from the given `.tflite` asset.
+  *
+@@ -18,6 +32,10 @@ console.log('Successfully installed!');
+  * @returns The loaded Model.
+  */
+ export function loadTensorflowModel(source, delegate = 'default') {
++    return loadTensorflowModelImpl(source, delegate);
++}
++async function loadTensorflowModelImpl(source, delegate) {
++    await ensureBindingsInstalled();
+     let uri;
+     if (typeof source === 'number') {
+         console.log(`Loading Tensorflow Lite Model ${source}`);
+diff --git a/node_modules/react-native-fast-tflite/src/TensorflowLite.ts b/node_modules/react-native-fast-tflite/src/TensorflowLite.ts
+index 967f46e..7bf9489 100644
+--- a/node_modules/react-native-fast-tflite/src/TensorflowLite.ts
++++ b/node_modules/react-native-fast-tflite/src/TensorflowLite.ts
+@@ -25,13 +25,33 @@ declare global {
+     delegate: TensorflowModelDelegate
+   ) => Promise<TensorflowModel>
+ }
+-// Installs the JSI bindings into the global namespace.
+-console.log('Installing bindings...')
+-const result = TensorflowModule.install() as boolean
+-if (result !== true)
+-  console.error('Failed to install Tensorflow Lite bindings!')
+ 
+-console.log('Successfully installed!')
++async function ensureBindingsInstalled(options?: {
++  maxAttempts?: number
++  retryDelayMs?: number
++}): Promise<void> {
++  const maxAttempts = options?.maxAttempts ?? 30
++  const retryDelayMs = options?.retryDelayMs ?? 50
++
++  if (typeof global.__loadTensorflowModel === 'function') return
++
++  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++    try {
++      const ok = TensorflowModule.install() as boolean
++      if (ok === true && typeof global.__loadTensorflowModel === 'function') return
++    } catch {
++      // ignore and retry
++    }
++
++    // даём RN и JSI runtime время подняться
++    await new Promise<void>(resolve => setTimeout(resolve, retryDelayMs))
++  }
++
++  throw new Error(
++    'TFLite: не удалось установить JSI bindings (global.__loadTensorflowModel отсутствует). ' +
++      'Чаще всего это значит, что install() вызвался слишком рано или iOS runtime ещё не готов.'
++  )
++}
+ 
+ export type TensorflowModelDelegate =
+   | 'default'
+@@ -126,6 +146,15 @@ export function loadTensorflowModel(
+   source: ModelSource,
+   delegate: TensorflowModelDelegate = 'default'
+ ): Promise<TensorflowModel> {
++  return loadTensorflowModelImpl(source, delegate)
++}
++
++async function loadTensorflowModelImpl(
++  source: ModelSource,
++  delegate: TensorflowModelDelegate
++): Promise<TensorflowModel> {
++  await ensureBindingsInstalled()
++
+   let uri: string
+   if (typeof source === 'number') {
+     console.log(`Loading Tensorflow Lite Model ${source}`)

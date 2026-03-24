@@ -1,0 +1,688 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import DocumentPicker from 'react-native-document-picker';
+import { createThumbnail } from 'react-native-create-thumbnail';
+import { loadTensorflowModel, type TensorflowModel } from 'react-native-fast-tflite';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as RNFS from 'react-native-fs';
+import { launchImageLibrary } from 'react-native-image-picker';
+import Video from 'react-native-video';
+import { YOLO } from '../constants/yolo';
+import { DetectionOverlay } from '../components/DetectionOverlay';
+import type { Detection, FrameSize } from '../types/detection';
+import { loadLabelsFromAsset } from '../utils/labels';
+import { decodeJpegToRgba } from '../utils/jpegDecode.ts';
+import { buildLetterboxedFloatInput } from '../utils/rgbLetterbox.ts';
+import { decodeYoloV8Detections } from '../utils/yoloPostprocess';
+
+const MODEL_ASSET = require('../../assets/models/model_float16.tflite');
+const LABELS_ASSET = require('../../assets/models/labels.txt');
+
+type Thumb = {
+  path: string;
+  width: number;
+  height: number;
+};
+
+function toFileUriMaybe(path: string) {
+  if (path.startsWith('file://')) return path;
+  return `file://${path}`;
+}
+
+function stripFileScheme(p: string) {
+  return p.startsWith('file://') ? p.slice('file://'.length) : p;
+}
+
+async function ensureVideoIsLocalFileUri(picked: {
+  uri?: string;
+  fileCopyUri?: string | null;
+  name?: string | null;
+}): Promise<string> {
+  // 1) Лучший кейс: DocumentPicker сам скопировал файл в cachesDirectory.
+  const copyUri = picked.fileCopyUri ?? undefined;
+  if (copyUri) return toFileUriMaybe(copyUri);
+
+  // 2) Иначе пробуем скопировать сами (пока у нас ещё есть доступ к security-scoped URL).
+  const srcUri = picked.uri;
+  if (!srcUri) throw new Error('Не удалось получить uri для видео.');
+  if (!srcUri.startsWith('file://')) {
+    throw new Error(
+      `Ожидался file:// uri. Получено: ${srcUri}. Попробуй выбрать видео из "Фото" или сохранить файл локально.`
+    );
+  }
+
+  const name = picked.name?.trim() || `video-${Date.now()}.mp4`;
+  const dstPath = `${RNFS.CachesDirectoryPath}/yolo-video-test-${Date.now()}-${name}`;
+  await RNFS.copyFile(stripFileScheme(srcUri), dstPath);
+  return toFileUriMaybe(dstPath);
+}
+
+function humanizeVideoOpenError(err: unknown): string {
+  const s = String(err);
+  // Частая ошибка AVFoundation: iOS не смог открыть файл (кодек/формат/файл не локальный).
+  if (s.includes('AVFoundationErrorDomain') && s.includes('Code=-11829')) {
+    return (
+      'iOS не смог открыть это видео (AVFoundation -11829 "Cannot Open").\n\n' +
+      'Чаще всего причины такие:\n' +
+      '- файл в iCloud/Files ещё не скачан локально\n' +
+      '- формат/кодек не поддерживается iOS (например .mkv / hevc в некоторых кейсах)\n\n' +
+      'Попробуй видео в MP4 (H.264) или сначала сохрани файл локально на устройство.'
+    );
+  }
+  if (s.includes('NSCocoaErrorDomain') && s.includes('Code=257')) {
+    return (
+      'iOS не дал доступ к файлу (NSCocoaErrorDomain 257).\n\n' +
+      'Так бывает, когда видео выбрано из Files/iCloud и доступ "security-scoped".\n\n' +
+      'Что попробовать:\n' +
+      '- выбери видео из "Фото" (Camera Roll)\n' +
+      '- или сначала "Сохранить видео" локально на устройство\n' +
+      '- или другой файл (MP4 H.264)\n\n' +
+      'Мы уже пытаемся копировать видео в cache приложения, но iOS иногда не даёт доступ к источнику.'
+    );
+  }
+  return s;
+}
+
+export function VideoDetectionScreen(props: { onBack?: () => void }) {
+  const insets = useSafeAreaInsets();
+
+  const [model, setModel] = useState<TensorflowModel | null>(null);
+  const [labels, setLabels] = useState<string[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [isLoadingModel, setIsLoadingModel] = useState(true);
+
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [timestampMs, setTimestampMs] = useState<number>(0);
+
+  const [thumb, setThumb] = useState<Thumb | null>(null);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [frameSize, setFrameSize] = useState<FrameSize | null>(null);
+  const [viewSize, setViewSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+  const [lastInferenceMs, setLastInferenceMs] = useState<number>(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [videoPositionMs, setVideoPositionMs] = useState(0);
+  const [autoInferEnabled, setAutoInferEnabled] = useState(true);
+  const [autoInferFps, setAutoInferFps] = useState<1 | 2 | 4 | 8>(4);
+
+  const lastAutoInferAtMsRef = useRef(0);
+  const processingRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setIsLoadingModel(true);
+        setModelError(null);
+        const [m, labs] = await Promise.all([
+          loadTensorflowModel(MODEL_ASSET),
+          loadLabelsFromAsset(LABELS_ASSET),
+        ]);
+        if (cancelled) return;
+        setModel(m);
+        setLabels(labs);
+      } catch (e) {
+        if (cancelled) return;
+        setModel(null);
+        setLabels([]);
+        setModelError(String(e));
+      } finally {
+        if (!cancelled) setIsLoadingModel(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const output0Shape = useMemo(() => {
+    const s = model?.outputs?.[0]?.shape;
+    return Array.isArray(s) ? s : undefined;
+  }, [model]);
+
+  const onPickVideoFromFiles = useCallback(async () => {
+    try {
+      setProcessingError(null);
+      // Важно для iOS: файл из Files/iCloud может быть "security-scoped" и не читаться нативными API.
+      // Поэтому просим DocumentPicker СКОПИРОВАТЬ файл в sandbox приложения (cache).
+      const picked = await DocumentPicker.pickSingle({
+        type: [DocumentPicker.types.video],
+        // На iOS 'import' чаще всего даёт доступ + копирование в sandbox.
+        mode: 'import',
+        copyTo: 'cachesDirectory',
+      });
+
+      const uri = await ensureVideoIsLocalFileUri({
+        uri: picked.uri,
+        fileCopyUri: picked.fileCopyUri,
+        name: picked.name,
+      });
+
+      setVideoUri(uri);
+      setTimestampMs(0);
+      setThumb(null);
+      setDetections([]);
+      setFrameSize(null);
+      setVideoPositionMs(0);
+      setIsPlaying(false);
+    } catch (e) {
+      if (DocumentPicker.isCancel(e)) return;
+      setProcessingError(humanizeVideoOpenError(e));
+    }
+  }, []);
+
+  const onPickVideoFromPhotos = useCallback(async () => {
+    try {
+      setProcessingError(null);
+      const res = await launchImageLibrary({
+        mediaType: 'video',
+        selectionLimit: 1,
+      });
+      if (res.didCancel) return;
+      if (res.errorCode) {
+        throw new Error(`${res.errorCode}: ${res.errorMessage ?? 'no message'}`);
+      }
+      const asset = res.assets?.[0];
+      const uri = asset?.uri;
+      if (!uri) throw new Error('Не удалось получить uri выбранного видео.');
+
+      // Обычно image-picker отдаёт локальный file:// путь, который нормально читается нативкой.
+      setVideoUri(toFileUriMaybe(uri));
+      setTimestampMs(0);
+      setThumb(null);
+      setDetections([]);
+      setFrameSize(null);
+      setVideoPositionMs(0);
+      setIsPlaying(false);
+    } catch (e) {
+      setProcessingError(humanizeVideoOpenError(e));
+    }
+  }, []);
+
+  const inferFrame = useCallback(async (params: {
+    labels: string[];
+    model: TensorflowModel | null;
+    output0Shape: number[] | undefined;
+    timestampMs: number;
+    videoUri: string | null;
+  }) => {
+    const labs = params.labels;
+    const m = params.model;
+    const outShape = params.output0Shape;
+    const tsMs = params.timestampMs;
+    const vUri = params.videoUri;
+
+    if (!vUri) return;
+    if (!m) return;
+    if (labs.length === 0) return;
+
+    try {
+      // Явные логи, чтобы было видно, что инференс реально идёт.
+      console.log(`[video] infer frame start @${tsMs}ms`);
+      const startInferFrame = Date.now();
+      const startThumbnail = Date.now();
+      const t = await createThumbnail({
+        url: vUri,
+        timeStamp: tsMs,
+        format: 'jpeg',
+        maxWidth: YOLO.inputSize,
+        maxHeight: YOLO.inputSize,
+        timeToleranceMs: 500,
+      });
+      setThumb({ path: t.path, width: t.width, height: t.height });
+      console.log('thumbnail time', Date.now() - startThumbnail + 'ms');
+
+      const startDecodeJpeg = Date.now();
+      const decoded = await decodeJpegToRgba(t.path);
+      console.log('decode time', Date.now() - startDecodeJpeg + 'ms');
+
+      const startBuildLetterboxedFloatInput = Date.now();
+      const { input, letterbox, srcFrameSize } = buildLetterboxedFloatInput(
+        decoded,
+        YOLO.inputSize
+      );
+      console.log('build letterboxed float input time', Date.now() - startBuildLetterboxedFloatInput + 'ms');
+
+      const t0 = Date.now();
+      const startInference = Date.now();
+      const outputs = m.runSync([input]);
+      const inferenceMs = Date.now() - t0;
+      setLastInferenceMs(inferenceMs);
+      console.log('inference time', Date.now() - startInference + 'ms');
+
+      const out0 = outputs[0];
+      if (!(out0 instanceof Float32Array)) {
+        throw new Error('Output[0] is not Float32Array. Для MVP ожидается float32 output.');
+      }
+
+      const startDecode = Date.now();
+      const decodedDetections = decodeYoloV8Detections(
+        out0,
+        outShape,
+        labs,
+        srcFrameSize,
+        letterbox,
+        YOLO.confidenceThreshold,
+        YOLO.iouThreshold,
+        YOLO.preNmsTopK,
+        YOLO.postNmsTopK
+      );
+
+      console.log('decode time', Date.now() - startDecode + 'ms');
+
+      setDetections(decodedDetections);
+      setFrameSize(srcFrameSize);
+
+      console.log(
+        `[video] infer done @${tsMs}ms: ${decodedDetections.length} objects, ${inferenceMs}ms`
+      );
+      console.log('infer frame time', Date.now() - startInferFrame + 'ms');
+    } catch (e) {
+      setProcessingError(humanizeVideoOpenError(e));
+    } finally {
+      setIsProcessing(false);
+      processingRef.current = false;
+    }
+  }, []);
+
+  const onInferCurrentFrame = useCallback(async () => {
+    if (isProcessing) return;
+
+    setIsProcessing(true);
+    setProcessingError(null);
+
+    await inferFrame({
+      labels,
+      model,
+      output0Shape,
+      timestampMs,
+      videoUri,
+    });
+  }, [inferFrame, videoUri, model, labels, isProcessing, timestampMs, output0Shape]);
+
+  const onTogglePlay = useCallback(() => {
+    setIsPlaying(v => !v);
+  }, []);
+
+  const onToggleAutoInfer = useCallback(() => {
+    setAutoInferEnabled(v => !v);
+  }, []);
+
+  const onCycleAutoInferFps = useCallback(() => {
+    setAutoInferFps(v => {
+      if (v === 1) return 2;
+      if (v === 2) return 4;
+      if (v === 4) return 8;
+      return 1;
+    });
+  }, []);
+
+  // Авто-инференс во время воспроизведения: берём текущий таймкод видео и раз в N мс делаем thumbnail+inference.
+  useEffect(() => {
+    if (!autoInferEnabled) return;
+
+    const minIntervalMs = Math.max(100, Math.round(1000 / autoInferFps));
+    const id = setInterval(() => {
+      const now = Date.now();
+      if (processingRef.current) return;
+      if (now - lastAutoInferAtMsRef.current < minIntervalMs) return;
+
+      lastAutoInferAtMsRef.current = now;
+      processingRef.current = true;
+
+      // запускаем инференс на текущем таймкоде, но не трогаем UI таймкод вручную
+      const ts = Math.max(
+        0,
+        Math.round(isPlaying ? videoPositionMs : timestampMs)
+      );
+
+      inferFrame({
+        labels,
+        model,
+        output0Shape,
+        timestampMs: ts,
+        videoUri,
+      }).catch(() => {
+        processingRef.current = false;
+      });
+    }, 80);
+
+    return () => clearInterval(id);
+  }, [
+    inferFrame,
+    autoInferEnabled,
+    autoInferFps,
+    isPlaying,
+    labels,
+    model,
+    output0Shape,
+    timestampMs,
+    videoPositionMs,
+    videoUri,
+  ]);
+
+  // Сразу после выбора видео делаем один auto-infer на 0ms (если включено).
+  useEffect(() => {
+    if (!autoInferEnabled) return;
+    if (!videoUri) return;
+    if (!model) return;
+    if (labels.length === 0) return;
+    setTimestampMs(0);
+    // делаем одиночный прогон
+    onInferCurrentFrame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoInferEnabled, labels.length, model, videoUri]);
+
+  const onPrev = useCallback(() => {
+    setTimestampMs(t => Math.max(0, t - 500));
+  }, []);
+  const onNext = useCallback(() => {
+    setTimestampMs(t => t + 500);
+  }, []);
+
+  const canInfer = !isLoadingModel && model != null && labels.length > 0 && videoUri != null;
+
+  console.log('Render');
+  console.log('isPlaying', isPlaying);
+  
+  return (
+    <View style={styles.root}>
+      <SafeAreaView edges={['top']} style={styles.topBarSafeArea}>
+        <View style={styles.topBar}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.smallButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={props.onBack}
+          >
+            <Text style={styles.smallButtonText}>Back</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.smallButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={onPickVideoFromPhotos}
+          >
+            <Text style={styles.smallButtonText}>Pick (Photos)</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+
+      <View
+        style={styles.preview}
+        onLayout={e => {
+          const { width, height } = e.nativeEvent.layout;
+          setViewSize({ width, height });
+        }}
+      >
+        {videoUri ? (
+          <>
+            <Video
+              source={{ uri: videoUri }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="contain"
+              paused={!isPlaying}
+              controls={true}
+              onProgress={p => {
+                // react-native-video отдаёт секунды
+                setVideoPositionMs(p.currentTime * 1000);
+              }}
+              onError={e => {
+                setProcessingError(`Video error: ${JSON.stringify(e)}`);
+              }}
+            />
+            <DetectionOverlay
+              detections={detections}
+              frameSize={frameSize}
+              viewSize={viewSize}
+            />
+          </>
+        ) : (
+          <View style={styles.center}>
+            <Text style={styles.title}>Тест по видео</Text>
+            <Text style={styles.text}>
+              Выбери видео с телефона, затем нажми "Infer frame".
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {isLoadingModel && (
+          <View style={styles.loadingInline}>
+            <ActivityIndicator color="#fff" size="small" />
+            <Text style={styles.loadingInlineText}>Загружаю модель…</Text>
+          </View>
+        )}
+
+        {modelError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>Модель не загрузилась</Text>
+            <Text style={styles.errorText}>{modelError}</Text>
+          </View>
+        )}
+
+        <View style={styles.metrics}>
+          <Metric label="Video" value={videoUri ? 'selected' : '—'} />
+          <Metric label="t, ms" value={String(Math.round(videoPositionMs))} />
+          <Metric label="Infer, ms" value={lastInferenceMs.toFixed(1)} />
+          <Metric label="Objects" value={String(detections.length)} />
+        </View>
+
+        <View style={[styles.row, styles.rowMt10]}>
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onTogglePlay}
+            disabled={!videoUri}
+          >
+            <Text style={styles.buttonText}>{isPlaying ? 'Pause' : 'Play'}</Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.row, styles.rowMt10]}>
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onToggleAutoInfer}
+            disabled={!videoUri || !model || labels.length === 0}
+          >
+            <Text style={styles.buttonText}>
+              Auto infer: {autoInferEnabled ? 'ON' : 'OFF'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onCycleAutoInferFps}
+            disabled={!autoInferEnabled}
+          >
+            <Text style={styles.buttonText}>FPS: {autoInferFps}</Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.row, styles.rowMt10]}>
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onPickVideoFromFiles}
+          >
+            <Text style={styles.buttonText}>Pick (Files)</Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.row, styles.rowMt10]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+              !canInfer && styles.buttonDisabled,
+            ]}
+            onPress={onInferCurrentFrame}
+            disabled={!canInfer}
+          >
+            <Text style={styles.buttonText}>
+              {isProcessing ? 'Processing…' : 'Infer frame'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.row, styles.rowMt10]}>
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onPrev}
+            disabled={!videoUri}
+          >
+            <Text style={styles.buttonText}>-0.5s</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            onPress={onNext}
+            disabled={!videoUri}
+          >
+            <Text style={styles.buttonText}>+0.5s</Text>
+          </Pressable>
+        </View>
+
+        {processingError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>Ошибка</Text>
+            <Text style={styles.errorText}>{processingError}</Text>
+          </View>
+        )}
+
+        {thumb && (
+          <Text style={styles.hint}>
+            Thumb: {thumb.width}x{thumb.height}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function Metric(props: { label: string; value: string }) {
+  return (
+    <View style={styles.metric}>
+      <Text style={styles.metricLabel}>{props.label}</Text>
+      <Text style={styles.metricValue}>{props.value}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#000' },
+  topBarSafeArea: {
+    backgroundColor: 'rgba(15, 15, 18, 0.95)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.15)',
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  smallButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  smallButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  preview: { flex: 1, backgroundColor: '#000' },
+  panel: {
+    backgroundColor: 'rgba(15, 15, 18, 0.95)',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.15)',
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  rowMt10: {
+    marginTop: 10,
+  },
+  button: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    backgroundColor: '#2b2b33',
+    alignItems: 'center',
+  },
+  buttonPressed: { opacity: 0.85 },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  metrics: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  metric: {
+    minWidth: 120,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  metricLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 12 },
+  metricValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  title: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 8 },
+  text: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  loadingInline: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  loadingInlineText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  errorBox: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+  },
+  errorTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 6 },
+  errorText: { color: 'rgba(255,255,255,0.8)', fontSize: 12, lineHeight: 16 },
+  hint: { marginTop: 8, color: 'rgba(255,255,255,0.5)', fontSize: 12 },
+});
+

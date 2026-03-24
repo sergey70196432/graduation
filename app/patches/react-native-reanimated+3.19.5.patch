@@ -1,0 +1,173 @@
+diff --git a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
+index 29f068c..142fc91 100644
+--- a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
++++ b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
+@@ -16,11 +16,11 @@ namespace worklets {
+ 
+ using namespace facebook;
+ using namespace react;
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ using namespace facebook::hermes::inspector_modern;
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ 
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ 
+ class HermesExecutorRuntimeAdapter : public RuntimeAdapter {
+  public:
+@@ -50,7 +50,7 @@ class HermesExecutorRuntimeAdapter : public RuntimeAdapter {
+   std::shared_ptr<MessageQueueThread> thread_;
+ };
+ 
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ 
+ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
+     std::unique_ptr<facebook::hermes::HermesRuntime> runtime,
+@@ -60,7 +60,7 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
+           *runtime,
+           reentrancyCheck_),
+       runtime_(std::move(runtime)) {
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+   auto adapter =
+       std::make_unique<HermesExecutorRuntimeAdapter>(*runtime_, jsQueue);
+   debugToken_ = chrome::enableDebugging(std::move(adapter), name);
+@@ -101,10 +101,10 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
+ }
+ 
+ ReanimatedHermesRuntime::~ReanimatedHermesRuntime() {
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+   // We have to disable debugging before the runtime is destroyed.
+   chrome::disableDebugging(debugToken_);
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ }
+ 
+ } // namespace worklets
+diff --git a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
+index 5bd2350..3cb0906 100644
+--- a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
++++ b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
+@@ -16,17 +16,17 @@
+ #include <string>
+ #include <thread>
+ 
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ #include <hermes/inspector-modern/chrome/Registration.h>
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ 
+ namespace worklets {
+ 
+ using namespace facebook;
+ using namespace react;
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ using namespace facebook::hermes::inspector_modern;
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ 
+ // ReentrancyCheck is copied from React Native
+ // from ReactCommon/hermes/executor/HermesExecutorFactory.cpp
+@@ -117,9 +117,9 @@ class ReanimatedHermesRuntime
+  private:
+   std::unique_ptr<facebook::hermes::HermesRuntime> runtime_;
+   ReanimatedReentrancyCheck reentrancyCheck_;
+-#if HERMES_ENABLE_DEBUGGER
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+   chrome::DebugSessionToken debugToken_;
+-#endif // HERMES_ENABLE_DEBUGGER
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
+ };
+ 
+ } // namespace worklets
+diff --git a/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm b/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm
+index 96ebbcd..b6949f5 100644
+--- a/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm
++++ b/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm
+@@ -10,6 +10,13 @@
+ #import <reanimated/apple/REAUIKit.h>
+ #import <reanimated/apple/REAUtils.h>
+ 
++// RN 0.84: `RCTRootView` реализует `-setIntrinsicContentSize:`, но метод не объявлен
++// в публичном header (и `UIView.intrinsicContentSize` readonly). Для компиляции
++// объявляем селектор здесь.
++@interface RCTRootView (ReanimatedIntrinsicContentSize)
++- (void)setIntrinsicContentSize:(CGSize)intrinsicContentSize;
++@end
++
+ @interface RCTUIManager (Reanimated)
+ @property REAAnimationsManager *animationsManager;
+ - (NSArray<id<RCTComponent>> *)_childrenToRemoveFromContainer:(id<RCTComponent>)container
+@@ -222,7 +229,10 @@ - (RCTViewManagerUIBlock)reanimated_uiBlockWithLayoutUpdateForRootView:(RCTRootS
+ 
+         RCTRootView *rootView = (RCTRootView *)[view superview];
+         if ([rootView isKindOfClass:[RCTRootView class]]) {
+-          rootView.intrinsicContentSize = contentSize;
++          // В RN 0.84 `intrinsicContentSize` у `UIView` объявлен как readonly,
++          // поэтому присваивание через dot-синтаксис не компилится.
++          // У `RCTRootView` при этом есть метод `-setIntrinsicContentSize:`.
++          [rootView setIntrinsicContentSize:contentSize];
+         }
+       });
+     }
+diff --git a/node_modules/react-native-reanimated/apple/reanimated/apple/native/NativeMethods.mm b/node_modules/react-native-reanimated/apple/reanimated/apple/native/NativeMethods.mm
+index 6c9523b..ff167d5 100644
+--- a/node_modules/react-native-reanimated/apple/reanimated/apple/native/NativeMethods.mm
++++ b/node_modules/react-native-reanimated/apple/reanimated/apple/native/NativeMethods.mm
+@@ -1,5 +1,6 @@
+ #import <React/RCTEventDispatcher.h>
+ #import <React/RCTScrollView.h>
++#import <objc/message.h>
+ #import <reanimated/apple/REAUIKit.h>
+ #import <reanimated/apple/native/NativeMethods.h>
+ 
+@@ -39,8 +40,41 @@
+ void scrollTo(int scrollViewTag, RCTUIManager *uiManager, double x, double y, bool animated)
+ {
+   REAUIView *view = [uiManager viewForReactTag:@(scrollViewTag)];
+-  RCTScrollView *scrollView = (RCTScrollView *)view;
+-  [scrollView scrollToOffset:(CGPoint){(CGFloat)x, (CGFloat)y} animated:animated];
++  if (view == nil) {
++    return;
++  }
++
++  const CGPoint offset = (CGPoint){(CGFloat)x, (CGFloat)y};
++
++  // RN 0.84 может компилироваться с `RCT_REMOVE_LEGACY_ARCH=1`, тогда `RCTScrollView`
++  // (legacy) отсутствует. Поэтому делаем максимально совместимую реализацию:
++  // - если объект умеет `scrollToOffset:animated:` (legacy RN) — вызываем её
++  // - иначе пытаемся получить `UIScrollView` и вызвать `setContentOffset:animated:`
++  SEL scrollToOffsetSel = @selector(scrollToOffset:animated:);
++  if ([view respondsToSelector:scrollToOffsetSel]) {
++    // `performSelector` нужен, чтобы не зависеть от типа `RCTScrollView` на этапе компиляции.
++    // clang-format off
++    ((void (*)(id, SEL, CGPoint, BOOL))objc_msgSend)(view, scrollToOffsetSel, offset, (BOOL)animated);
++    // clang-format on
++    return;
++  }
++
++  if ([view isKindOfClass:[UIScrollView class]]) {
++    UIScrollView *scrollView = (UIScrollView *)view;
++    [scrollView setContentOffset:offset animated:(BOOL)animated];
++    return;
++  }
++
++  // Часто ScrollView — это контейнер с полем/геттером `scrollView`.
++  @try {
++    id maybeScrollView = [view valueForKey:@"scrollView"];
++    if ([maybeScrollView isKindOfClass:[UIScrollView class]]) {
++      UIScrollView *scrollView = (UIScrollView *)maybeScrollView;
++      [scrollView setContentOffset:offset animated:(BOOL)animated];
++    }
++  } @catch (__unused NSException *e) {
++    // ignore
++  }
+ }
+ 
+ void setGestureState(id<RNGestureHandlerStateManager> gestureHandlerStateManager, int handlerTag, int newState)

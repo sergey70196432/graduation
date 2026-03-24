@@ -1,0 +1,76 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+# Включаем New Architecture для iOS.
+# react-native-fast-tflite использует TurboModule метод install(),
+# и без New Architecture на iOS этот метод недоступен.
+ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'app' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # RN 0.84 + Hermes V1:
+    # Некоторые Pods (например RNReanimated) компилируются без `HERMES_V1_ENABLED`,
+    # из-за чего попадают в ветку `!defined(HERMES_V1_ENABLED)` и пытаются включить
+    # `<hermes/inspector/RuntimeAdapter.h>`, которого нет в prebuilt Hermes V1.
+    #
+    # Важно: react_native_post_install добавляет debug-дефайны через installer.target_installation_results,
+    # поэтому патч делаем там же, чтобы он реально попал в `*.xcconfig`.
+    installer.target_installation_results.pod_target_installation_results.each do |_pod_name, target_installation_result|
+      target_installation_result.native_target.build_configurations.each do |c|
+        defs = c.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+
+        if defs == nil
+          defs = '$(inherited) '
+        elsif defs.is_a?(Array)
+          defs = defs.join(' ') + ' '
+        else
+          defs = defs.to_s
+          defs = defs.end_with?(' ') ? defs : (defs + ' ')
+        end
+
+        unless defs.include?('HERMES_V1_ENABLED=1')
+          defs = defs + 'HERMES_V1_ENABLED=1'
+        end
+
+        c.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
+      end
+    end
+
+    # RN 0.84+ использует C++20 (concepts/requires) в ReactCommon.
+    # Иногда Pods остаются на C++17 и сборка падает с "Unknown type name 'requires'".
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |bc|
+        bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+        bc.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'
+      end
+    end
+  end
+end
