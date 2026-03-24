@@ -12,3 +12,11 @@ datasets/*
 models/*
 !models/.gitkeep
 
+/flutter
+/flutter_app
+
+/app/__tests__
+/app/.bundle
+/app/.tmp
+/app/.tmp-fast-tflite
+
