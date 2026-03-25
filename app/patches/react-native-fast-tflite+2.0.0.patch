@@ -1,3 +1,79 @@
+diff --git a/node_modules/react-native-fast-tflite/android/CMakeLists.txt b/node_modules/react-native-fast-tflite/android/CMakeLists.txt
+index e43cc1f..0945d7b 100644
+--- a/node_modules/react-native-fast-tflite/android/CMakeLists.txt
++++ b/node_modules/react-native-fast-tflite/android/CMakeLists.txt
+@@ -5,9 +5,22 @@ set (CMAKE_VERBOSE_MAKEFILE ON)
+ set (PACKAGE_NAME "VisionCameraTflite")
+ set (CMAKE_CXX_STANDARD 17)
+ 
++if(NOT DEFINED RN_IDE_SYNC)
++  set(RN_IDE_SYNC 0)
++endif()
++
+ find_package(ReactAndroid REQUIRED CONFIG)
+ find_package(fbjni REQUIRED CONFIG)
+ 
++if(RN_IDE_SYNC)
++  # Android Studio Gradle Sync может запускать CMake configure до того,
++  # как Gradle-скрипт распакует .so/.h из AAR (litert) в src/main/cpp/lib/.
++  # Создаём папки заранее и не падаем на NOTFOUND в режиме sync.
++  file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/src/main/cpp/lib/litert/headers")
++  file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/src/main/cpp/lib/litert/headers/tflite")
++  file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/src/main/cpp/lib/litert/jni/${ANDROID_ABI}")
++endif()
++
+ find_library(
+   TFLITE
+   tensorflowlite_jni
+@@ -62,10 +75,24 @@ target_link_libraries(
+   android                         # <-- log
+   ReactAndroid::jsi               # <-- jsi.h
+   fbjni::fbjni                    # <-- fbjni.h
+-  ${TFLITE}
+-  ${TFLITE_GPU}
+ )
+ 
++if(TFLITE)
++  target_link_libraries(${PACKAGE_NAME} ${TFLITE})
++elseif(NOT RN_IDE_SYNC)
++  message(FATAL_ERROR "react-native-fast-tflite: tensorflowlite_jni not found. Run a full Gradle build once to extract AAR .so files.")
++else()
++  message(WARNING "react-native-fast-tflite: tensorflowlite_jni not found during IDE sync (ok).")
++endif()
++
++if(TFLITE_GPU)
++  target_link_libraries(${PACKAGE_NAME} ${TFLITE_GPU})
++elseif(NOT RN_IDE_SYNC)
++  message(FATAL_ERROR "react-native-fast-tflite: tensorflowlite_gpu_jni not found. Run a full Gradle build once to extract AAR .so files.")
++else()
++  message(WARNING "react-native-fast-tflite: tensorflowlite_gpu_jni not found during IDE sync (ok).")
++endif()
++
+ if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 76)
+   target_link_libraries(
+     ${PACKAGE_NAME}
+diff --git a/node_modules/react-native-fast-tflite/android/build.gradle b/node_modules/react-native-fast-tflite/android/build.gradle
+index 5283afc..42cd521 100644
+--- a/node_modules/react-native-fast-tflite/android/build.gradle
++++ b/node_modules/react-native-fast-tflite/android/build.gradle
+@@ -49,6 +49,7 @@ static def findNodeModules(baseDir) {
+ }
+ 
+ def nodeModules = findNodeModules(projectDir)
++def isIdeSync = project.hasProperty("android.injected.build.model.only") && project.property("android.injected.build.model.only") == "true"
+ 
+ android {
+   ndkVersion getExtOrDefault("ndkVersion")
+@@ -64,7 +65,8 @@ android {
+         arguments "-DANDROID_STL=c++_shared",
+                 "-DNODE_MODULES_DIR=${nodeModules}",
+                 "-DIS_NEW_ARCHITECTURE_ENABLED=${isNewArchitectureEnabled()}",
+-                "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
++                "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
++                "-DRN_IDE_SYNC=${isIdeSync ? 1 : 0}"
+         cppFlags "-O2 -frtti -fexceptions -Wall -fstack-protector-all"
+         abiFilters "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
+       }
 diff --git a/node_modules/react-native-fast-tflite/ios/Tflite.mm b/node_modules/react-native-fast-tflite/ios/Tflite.mm
 index c76d3fa..4ff6e0a 100644
 --- a/node_modules/react-native-fast-tflite/ios/Tflite.mm

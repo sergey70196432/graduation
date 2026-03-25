@@ -24,7 +24,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     window = UIWindow(frame: UIScreen.main.bounds)
 
     factory.startReactNative(
-      withModuleName: "app",
+      withModuleName: "SignsDetection",
       in: window,
       launchOptions: launchOptions
     )

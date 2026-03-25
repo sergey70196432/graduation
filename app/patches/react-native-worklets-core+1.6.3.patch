@@ -1,0 +1,16 @@
+diff --git a/node_modules/react-native-worklets-core/android/build.gradle b/node_modules/react-native-worklets-core/android/build.gradle
+index b6af1c3..5a5b899 100644
+--- a/node_modules/react-native-worklets-core/android/build.gradle
++++ b/node_modules/react-native-worklets-core/android/build.gradle
+@@ -63,6 +63,11 @@ task prepareHeaders(type: Copy) {
+   includeEmptyDirs = false
+ }
+ 
++// Android Studio Gradle Sync может конфигурировать CMake до выполнения задач Gradle,
++// а prefab include-dirs указывают на build/headers/rnworklets. Создаём папку заранее,
++// чтобы CMake configure не падал на "non-existent path".
++new File("${project.buildDir}/headers/rnworklets/").mkdirs()
++
+ task deleteCmakeCache() {
+   doFirst {
+     delete "${projectDir}/.cxx"

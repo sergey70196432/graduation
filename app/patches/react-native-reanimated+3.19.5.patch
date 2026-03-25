@@ -1,91 +1,164 @@
 diff --git a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
-index 29f068c..142fc91 100644
+index 29f068c..11c21f6 100644
 --- a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
 +++ b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.cpp
-@@ -16,11 +16,11 @@ namespace worklets {
+@@ -16,11 +16,13 @@ namespace worklets {
  
  using namespace facebook;
  using namespace react;
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
  using namespace facebook::hermes::inspector_modern;
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
  
  class HermesExecutorRuntimeAdapter : public RuntimeAdapter {
   public:
-@@ -50,7 +50,7 @@ class HermesExecutorRuntimeAdapter : public RuntimeAdapter {
+@@ -50,7 +52,7 @@ class HermesExecutorRuntimeAdapter : public RuntimeAdapter {
    std::shared_ptr<MessageQueueThread> thread_;
  };
  
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  
  ReanimatedHermesRuntime::ReanimatedHermesRuntime(
      std::unique_ptr<facebook::hermes::HermesRuntime> runtime,
-@@ -60,7 +60,7 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
+@@ -60,7 +62,8 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
            *runtime,
            reentrancyCheck_),
        runtime_(std::move(runtime)) {
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
    auto adapter =
        std::make_unique<HermesExecutorRuntimeAdapter>(*runtime_, jsQueue);
    debugToken_ = chrome::enableDebugging(std::move(adapter), name);
-@@ -101,10 +101,10 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
+@@ -101,10 +104,11 @@ ReanimatedHermesRuntime::ReanimatedHermesRuntime(
  }
  
  ReanimatedHermesRuntime::~ReanimatedHermesRuntime() {
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
    // We have to disable debugging before the runtime is destroyed.
    chrome::disableDebugging(debugToken_);
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  }
  
  } // namespace worklets
 diff --git a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
-index 5bd2350..3cb0906 100644
+index 5bd2350..53418c0 100644
 --- a/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
 +++ b/node_modules/react-native-reanimated/Common/cpp/worklets/WorkletRuntime/ReanimatedHermesRuntime.h
-@@ -16,17 +16,17 @@
+@@ -16,17 +16,19 @@
  #include <string>
  #include <thread>
  
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
  #include <hermes/inspector-modern/chrome/Registration.h>
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  
  namespace worklets {
  
  using namespace facebook;
  using namespace react;
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
  using namespace facebook::hermes::inspector_modern;
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  
  // ReentrancyCheck is copied from React Native
  // from ReactCommon/hermes/executor/HermesExecutorFactory.cpp
-@@ -117,9 +117,9 @@ class ReanimatedHermesRuntime
+@@ -117,9 +119,10 @@ class ReanimatedHermesRuntime
   private:
    std::unique_ptr<facebook::hermes::HermesRuntime> runtime_;
    ReanimatedReentrancyCheck reentrancyCheck_;
 -#if HERMES_ENABLE_DEBUGGER
-+#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#if HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && \
++    (!defined(REACT_NATIVE_MINOR_VERSION) || REACT_NATIVE_MINOR_VERSION < 82)
    chrome::DebugSessionToken debugToken_;
 -#endif // HERMES_ENABLE_DEBUGGER
-+#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED)
++#endif // HERMES_ENABLE_DEBUGGER && !defined(HERMES_V1_ENABLED) && (RN minor < 82)
  };
  
  } // namespace worklets
+diff --git a/node_modules/react-native-reanimated/Common/cpp/reanimated/LayoutAnimations/LayoutAnimationsProxy.h b/node_modules/react-native-reanimated/Common/cpp/reanimated/LayoutAnimations/LayoutAnimationsProxy.h
+index 8e970cb..7992d3a 100644
+--- a/node_modules/react-native-reanimated/Common/cpp/reanimated/LayoutAnimations/LayoutAnimationsProxy.h
++++ b/node_modules/react-native-reanimated/Common/cpp/reanimated/LayoutAnimations/LayoutAnimationsProxy.h
+@@ -57,7 +57,7 @@ struct LayoutAnimationsProxy
+   mutable std::unordered_set<SurfaceId> surfacesToRemove_;
+   mutable std::vector<Tag> finishedAnimationTags_;
+   std::shared_ptr<LayoutAnimationsManager> layoutAnimationsManager_;
+-  ContextContainer::Shared contextContainer_;
++  std::shared_ptr<const ContextContainer> contextContainer_;
+   SharedComponentDescriptorRegistry componentDescriptorRegistry_;
+   jsi::Runtime &uiRuntime_;
+   const std::shared_ptr<UIScheduler> uiScheduler_;
+@@ -70,7 +70,7 @@ struct LayoutAnimationsProxy
+   LayoutAnimationsProxy(
+       std::shared_ptr<LayoutAnimationsManager> layoutAnimationsManager,
+       SharedComponentDescriptorRegistry componentDescriptorRegistry,
+-      ContextContainer::Shared contextContainer,
++      std::shared_ptr<const ContextContainer> contextContainer,
+       jsi::Runtime &uiRuntime,
+       const std::shared_ptr<UIScheduler> uiScheduler
+ #ifdef ANDROID
+diff --git a/node_modules/react-native-reanimated/android/build.gradle b/node_modules/react-native-reanimated/android/build.gradle
+index e102f43..60461ec 100644
+--- a/node_modules/react-native-reanimated/android/build.gradle
++++ b/node_modules/react-native-reanimated/android/build.gradle
+@@ -77,7 +77,8 @@ def resolveReactNativeDirectory() {
+     }
+ 
+     // Fallback to node resolver for custom directory structures like monorepos.
+-    def reactNativePackage = file(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim())
++    def nodeBinary = System.getenv("REACT_NATIVE_NODE_BINARY") ?: System.getenv("NODE_BINARY") ?: "node"
++    def reactNativePackage = file([nodeBinary, "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim())
+     if(reactNativePackage.exists()) {
+         return reactNativePackage.parentFile
+     }
+@@ -172,7 +173,10 @@ def JS_RUNTIME = {
+ 
+ def jsRuntimeDir = {
+     if (JS_RUNTIME == "hermes") {
+-        return Paths.get(reactNativeRootDir.path, "sdks", "hermes")
++        // RN 0.84+ uses sdks/hermes-engine
++        def hermesEngine = Paths.get(reactNativeRootDir.path, "sdks", "hermes-engine")
++        def hermesLegacy = Paths.get(reactNativeRootDir.path, "sdks", "hermes")
++        return hermesEngine.toFile().exists() ? hermesEngine : hermesLegacy
+     } else if (JS_RUNTIME == "v8") {
+         return findProject(":react-native-v8").getProjectDir().getParent()
+     } else {
+diff --git a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/CMakeLists.txt b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/CMakeLists.txt
+index bb61ff7..a35fa79 100644
+--- a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/CMakeLists.txt
++++ b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/CMakeLists.txt
+@@ -57,7 +57,12 @@ else()
+ endif()
+ 
+ if(${JS_RUNTIME} STREQUAL "hermes")
+-  target_link_libraries(worklets hermes-engine::libhermes)
++  if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 82)
++    # RN 0.82+ / Hermes v1 uses hermesvm target instead of libhermes
++    target_link_libraries(worklets hermes-engine::hermesvm)
++  else()
++    target_link_libraries(worklets hermes-engine::libhermes)
++  endif()
+ 
+   if(${HERMES_ENABLE_DEBUGGER})
+     string(APPEND CMAKE_CXX_FLAGS " -DHERMES_ENABLE_DEBUGGER=1")
 diff --git a/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm b/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm
 index 96ebbcd..b6949f5 100644
 --- a/node_modules/react-native-reanimated/apple/reanimated/apple/LayoutReanimation/REASwizzledUIManager.mm
@@ -171,3 +244,233 @@ index 6c9523b..ff167d5 100644
  }
  
  void setGestureState(id<RNGestureHandlerStateManager> gestureHandlerStateManager, int handlerTag, int newState)
+diff --git a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/ReanimatedModule.java b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/ReanimatedModule.java
+index 14d252c..081dd0e 100644
+--- a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/ReanimatedModule.java
++++ b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/ReanimatedModule.java
+@@ -10,7 +10,6 @@ import com.facebook.react.bridge.UIManagerListener;
+ import com.facebook.react.fabric.FabricUIManager;
+ import com.facebook.react.module.annotations.ReactModule;
+ import com.facebook.react.uimanager.UIManagerModule;
+-import com.facebook.react.uimanager.UIManagerModuleListener;
+ import com.swmansion.worklets.WorkletsModule;
+ import java.util.ArrayList;
+ import java.util.Objects;
+@@ -18,7 +17,7 @@ import javax.annotation.Nullable;
+ 
+ @ReactModule(name = ReanimatedModule.NAME)
+ public class ReanimatedModule extends NativeReanimatedModuleSpec
+-    implements LifecycleEventListener, UIManagerModuleListener, UIManagerListener {
++    implements LifecycleEventListener, UIManagerListener {
+ 
+   public void didDispatchMountItems(@NonNull UIManager uiManager) {
+     // Keep: Required for UIManagerListener
+@@ -32,14 +31,37 @@ public class ReanimatedModule extends NativeReanimatedModuleSpec
+     // Keep: Required for UIManagerListener
+   }
+ 
++  @Override
+   public void willDispatchViewUpdates(@NonNull UIManager uiManager) {
+-    // This method is called for the interface of UIManagerListener on Fabric.
+-    // The below function with the same name won't be called.
+-    if (mOperations.isEmpty()) {
++    // RN 0.84+: This callback is invoked by Paper only.
++    if (mOperations.isEmpty()) return;
++
++    final ArrayList<UIThreadOperation> operations = mOperations;
++    mOperations = new ArrayList<>();
++
++    if (uiManager instanceof UIManagerModule) {
++      ((UIManagerModule) uiManager)
++          .addUIBlock(
++              nativeViewHierarchyManager -> {
++                NodesManager nodesManager = getNodesManager();
++                for (UIThreadOperation operation : operations) {
++                  operation.execute(nodesManager);
++                }
++              });
+       return;
+     }
++
++    // If this isn't Paper, ignore.
++  }
++
++  @Override
++  public void willMountItems(@NonNull UIManager uiManager) {
++    // RN 0.84+: Fabric callback. Execute queued UI operations using UIBlocks.
++    if (mOperations.isEmpty()) return;
++
+     final ArrayList<UIThreadOperation> operations = mOperations;
+     mOperations = new ArrayList<>();
++
+     if (uiManager instanceof FabricUIManager) {
+       ((FabricUIManager) uiManager)
+           .addUIBlock(
+@@ -49,13 +71,9 @@ public class ReanimatedModule extends NativeReanimatedModuleSpec
+                   operation.execute(nodesManager);
+                 }
+               });
+-    } else {
+-      throw new RuntimeException("[Reanimated] Failed to obtain instance of FabricUIManager.");
+     }
+   }
+ 
+-  public void willMountItems(@NonNull UIManager uiManager) {}
+-
+   private interface UIThreadOperation {
+     void execute(NodesManager nodesManager);
+   }
+@@ -92,9 +110,9 @@ public class ReanimatedModule extends NativeReanimatedModuleSpec
+     } else {
+       UIManagerModule uiManager =
+           Objects.requireNonNull(reactCtx.getNativeModule(UIManagerModule.class));
+-      uiManager.addUIManagerListener(this);
++      uiManager.addUIManagerEventListener(this);
+       mUnsubscribe =
+-          Utils.combineRunnables(mUnsubscribe, () -> uiManager.removeUIManagerListener(this));
++          Utils.combineRunnables(mUnsubscribe, () -> uiManager.removeUIManagerEventListener(this));
+     }
+     reactCtx.addLifecycleEventListener(this);
+     mUnsubscribe =
+@@ -120,23 +138,7 @@ public class ReanimatedModule extends NativeReanimatedModuleSpec
+     // do nothing
+   }
+ 
+-  @Override
+-  public void willDispatchViewUpdates(final UIManagerModule uiManager) {
+-    // This method is called for the interface of UIManagerModuleListener on
+-    // Paper. The below function with the same name won't be called.
+-    if (mOperations.isEmpty()) {
+-      return;
+-    }
+-    final ArrayList<UIThreadOperation> operations = mOperations;
+-    mOperations = new ArrayList<>();
+-    uiManager.addUIBlock(
+-        nativeViewHierarchyManager -> {
+-          NodesManager nodesManager = getNodesManager();
+-          for (UIThreadOperation operation : operations) {
+-            operation.execute(nodesManager);
+-          }
+-        });
+-  }
++  // UIManagerModuleListener was removed in RN 0.84; Paper work is handled in willDispatchViewUpdates(UIManager).
+ 
+   /*package*/
+   public NodesManager getNodesManager() {
+diff --git a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/layoutReanimation/ReanimatedUIManager.java b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/layoutReanimation/ReanimatedUIManager.java
+index 9c84f87..dc21385 100644
+--- a/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/layoutReanimation/ReanimatedUIManager.java
++++ b/node_modules/react-native-reanimated/android/src/main/java/com/swmansion/reanimated/layoutReanimation/ReanimatedUIManager.java
+@@ -21,9 +21,8 @@ public class ReanimatedUIManager extends UIManagerModule {
+     super(reactContext, viewManagersList, minTimeLeftInFrameForNonBatchedOperationMs);
+   }
+ 
+-  public void onBatchComplete() {
+-    super.onBatchComplete();
+-  }
++  // RN 0.84: UIManagerModule#onBatchComplete was removed. Keep class for compatibility,
++  // but don't call missing method.
+ 
+   @Override
+   public boolean canOverrideExistingModule() {
+diff --git a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/AndroidUIScheduler.h b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/AndroidUIScheduler.h
+index 6224980..5cfd054 100644
+--- a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/AndroidUIScheduler.h
++++ b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/AndroidUIScheduler.h
+@@ -5,7 +5,6 @@
+ #include <fbjni/fbjni.h>
+ #include <jni.h>
+ #include <jsi/jsi.h>
+-#include <react/jni/CxxModuleWrapper.h>
+ #include <react/jni/JMessageQueueThread.h>
+ 
+ #include <memory>
+diff --git a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/WorkletsModule.h b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/WorkletsModule.h
+index 1cd7bf2..d5353cc 100644
+--- a/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/WorkletsModule.h
++++ b/node_modules/react-native-reanimated/android/src/main/cpp/worklets/android/WorkletsModule.h
+@@ -9,7 +9,6 @@
+ #include <ReactCommon/CallInvokerHolder.h>
+ #include <fbjni/fbjni.h>
+ #include <jsi/jsi.h>
+-#include <react/jni/CxxModuleWrapper.h>
+ #include <react/jni/JMessageQueueThread.h>
+ #include <react/jni/WritableNativeMap.h>
+ 
+diff --git a/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/NativeProxy.h b/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/NativeProxy.h
+index b2c1fab..0ba9726 100644
+--- a/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/NativeProxy.h
++++ b/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/NativeProxy.h
+@@ -9,7 +9,6 @@
+ #include <ReactCommon/CallInvokerHolder.h>
+ #include <fbjni/fbjni.h>
+ #include <jsi/jsi.h>
+-#include <react/jni/CxxModuleWrapper.h>
+ #include <react/jni/JavaScriptExecutorHolder.h>
+ #include <react/jni/WritableNativeMap.h>
+ 
+diff --git a/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/JNIHelper.h b/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/JNIHelper.h
+index 4be3555..64991a1 100644
+--- a/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/JNIHelper.h
++++ b/node_modules/react-native-reanimated/android/src/main/cpp/reanimated/android/JNIHelper.h
+@@ -3,7 +3,6 @@
+ #include <fbjni/fbjni.h>
+ #include <jsi/JSIDynamic.h>
+ #include <jsi/jsi.h>
+-#include <react/jni/CxxModuleWrapper.h>
+ #include <react/jni/JMessageQueueThread.h>
+ #include <react/jni/WritableNativeMap.h>
+ #include <string>
+diff --git a/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationListener.java b/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationListener.java
+new file mode 100644
+index 0000000..c2cb576
+--- /dev/null
++++ b/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationListener.java
+@@ -0,0 +1,10 @@
++package com.facebook.react.uimanager.layoutanimation;
++
++/**
++ * RN 0.84 removed Paper layout animation classes from react-android.
++ * Reanimated still references them in legacy code paths; this is a minimal compatibility stub.
++ */
++public interface LayoutAnimationListener {
++  void onAnimationEnd();
++}
++
+diff --git a/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationController.java b/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationController.java
+new file mode 100644
+index 0000000..1e99e2a
+--- /dev/null
++++ b/node_modules/react-native-reanimated/android/src/main/java/com/facebook/react/uimanager/layoutanimation/LayoutAnimationController.java
+@@ -0,0 +1,31 @@
++package com.facebook.react.uimanager.layoutanimation;
++
++import android.view.View;
++
++/**
++ * RN 0.84 removed Paper layout animation classes from react-android.
++ * Reanimated still references them in legacy code paths; this is a minimal compatibility stub.
++ *
++ * This implementation is intentionally a no-op.
++ */
++public class LayoutAnimationController {
++  public LayoutAnimationController() {}
++
++  public boolean shouldAnimateLayout(View viewToAnimate) {
++    return false;
++  }
++
++  public void reset() {}
++
++  public void applyLayoutUpdate(View view, int x, int y, int width, int height) {
++    if (view == null) return;
++    view.layout(x, y, x + width, y + height);
++  }
++
++  public void deleteView(View view, LayoutAnimationListener listener) {
++    if (listener != null) {
++      listener.onAnimationEnd();
++    }
++  }
++}
++

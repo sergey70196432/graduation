@@ -16,6 +16,24 @@ import { decodeYoloV8Detections, type LetterboxMeta } from '../utils/yoloPostpro
 const MODEL_ASSET = require('../../assets/models/model_float16.tflite');
 const LABELS_ASSET = require('../../assets/models/labels.txt');
 
+function readBuildFlag(name: string): boolean {
+  // RN/Expo: env может быть “вшит” на этапе сборки, либо отсутствовать в рантайме.
+  const g = globalThis as unknown as {
+    process?: { env?: Record<string, unknown> };
+  };
+  const env = g.process?.env;
+  const raw =
+    env?.[name] ??
+    env?.[`EXPO_PUBLIC_${name}`] ??
+    env?.[`REACT_NATIVE_${name}`];
+
+  if (raw == null) return false;
+  const s = String(raw).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
+const WRITE_LOGS = readBuildFlag('WRITE_LOGS');
+
 type FramePerf = {
   frameW: number;
   frameH: number;
@@ -58,6 +76,7 @@ export function useYoloDetector() {
   const [stats, setStats] = useState<DetectorStats>({
     fps: 0,
     lastInferenceMs: 0,
+    lastTotalMs: 0,
     lastNumDetections: 0,
     lastUpdatedAtMs: 0,
     inputSize: YOLO.inputSize,
@@ -93,6 +112,13 @@ export function useYoloDetector() {
   }, []);
 
   useEffect(() => {
+    if (!WRITE_LOGS) {
+      isLoggingRef.current = false;
+      logLinesRef.current = [];
+      if (isDetecting) setLastLogFilePath(null);
+      return;
+    }
+
     const was = wasDetectingRef.current;
     wasDetectingRef.current = isDetecting;
 
@@ -240,6 +266,7 @@ export function useYoloDetector() {
     setStats({
       fps: fpsRef.current.fps,
       lastInferenceMs: payload.inferenceMs,
+      lastTotalMs: payload.perf.totalMs,
       lastNumDetections: payload.detections.length,
       lastUpdatedAtMs: payload.updatedAtMs,
       inputSize: YOLO.inputSize,
@@ -260,12 +287,22 @@ export function useYoloDetector() {
     return Array.isArray(s) ? s : undefined;
   }, [model]);
 
+  const workletMinIntervalMs = Platform.OS === 'android' ? 800 : 80;
+
   const frameProcessor = useFrameProcessor(
     (frame: Frame) => {
       'worklet';
       if (!isDetecting) return;
       if (model == null) return;
       if (labels.length === 0) return;
+
+      // Важно: не грузим video-thread постоянной инференс-работой.
+      // Иначе на Android возможен abort из-за "SuspendAll timeout" (VisionCamera.video).
+      const now0 = Date.now();
+      if (now0 - lastReportAtMs.value < workletMinIntervalMs) {
+        droppedFrames.value = droppedFrames.value + 1;
+        return;
+      }
 
       // Запускаем синхронно прямо в frameProcessor (без runAsync),
       // чтобы избежать "cannot be shared" при передаче closure в async runtime.
@@ -278,7 +315,7 @@ export function useYoloDetector() {
         }
         isProcessing.value = true;
 
-        const tStart = Date.now();
+        const tStart = now0;
         const frameW = frame.width;
         const frameH = frame.height;
 
@@ -302,9 +339,20 @@ export function useYoloDetector() {
         // 2) Letterbox + нормализация 0..1
         stage = 'letterbox';
         const tLetter0 = Date.now();
-        const inputFloat = new Float32Array(inputSize * inputSize * 3);
+        const len = inputSize * inputSize * 3;
+        const gg = globalThis as unknown as {
+          __yoloInputFloat?: Float32Array;
+        };
+        let inputFloat = gg.__yoloInputFloat;
+        if (!(inputFloat instanceof Float32Array) || inputFloat.length !== len) {
+          inputFloat = new Float32Array(len);
+          gg.__yoloInputFloat = inputFloat;
+        } else {
+          inputFloat.fill(0);
+        }
         const srcRowStride = resizedWidth * 3;
         const dstRowStride = inputSize * 3;
+        const inv255 = 1 / 255;
 
         for (let y = 0; y < resizedHeight; y++) {
           const srcRow = y * srcRowStride;
@@ -312,15 +360,12 @@ export function useYoloDetector() {
           for (let x = 0; x < resizedWidth; x++) {
             const si = srcRow + x * 3;
             const di = dstRow + x * 3;
-            const r0 = resized[si];
-            const g0 = resized[si + 1];
-            const b0 = resized[si + 2];
-            const r = r0 === undefined ? 0 : r0;
-            const g = g0 === undefined ? 0 : g0;
-            const b = b0 === undefined ? 0 : b0;
-            inputFloat[di] = r / 255;
-            inputFloat[di + 1] = g / 255;
-            inputFloat[di + 2] = b / 255;
+            const r = resized[si] ?? 0;
+            const g = resized[si + 1] ?? 0;
+            const b = resized[si + 2] ?? 0;
+            inputFloat[di] = r * inv255;
+            inputFloat[di + 1] = g * inv255;
+            inputFloat[di + 2] = b * inv255;
           }
         }
         const letterboxMs = Date.now() - tLetter0;
@@ -370,9 +415,8 @@ export function useYoloDetector() {
 
         stage = 'report';
         const now = Date.now();
-        const minIntervalMs = 80;
-        if (now - lastReportAtMs.value >= minIntervalMs) {
-          lastReportAtMs.value = now;
+        if (now - lastReportAtMs.value >= workletMinIntervalMs) {
+          lastReportAtMs.value = now0;
           const dropped = droppedFrames.value;
           droppedFrames.value = 0;
           onWorkletResult({

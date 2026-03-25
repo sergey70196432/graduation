@@ -117,3 +117,18 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+/**
+ * Workaround for RN 0.84+ New Architecture codegen:
+ * `./gradlew clean` runs `externalNativeBuildClean*` which re-configures CMake using
+ * `Android-autolinking.cmake`. That file can reference codegen `jni/` folders in
+ * `node_modules/<package>/android/build/generated/...` which don't exist during clean, causing failures.
+ *
+ * Disabling native clean keeps `clean` usable; when you need a full native reset,
+ * delete `android/app/.cxx` and `android/app/build` manually.
+ */
+afterEvaluate {
+    tasks.matching { it.name.startsWith("externalNativeBuildClean") }.configureEach { t ->
+        t.enabled = false
+    }
+}

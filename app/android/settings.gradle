@@ -1,6 +1,112 @@
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+
+// Android Studio/Gradle daemon часто запускается без PATH твоего shell,
+// поэтому `npx`/`node` могут быть "не найдены". Автолинк React Native требует
+// выполнить команду, которая печатает JSON (react-native config) в stdout.
+//
+// Здесь мы:
+// - находим `node` (по env или стандартным путям)
+// - запускаем RN CLI через `node ../node_modules/react-native/cli.js config`
+// - генерим build/generated/autolinking/autolinking.json автоматически при Sync
+
+def home = System.getProperty("user.home")
+def envNode = System.getenv("REACT_NATIVE_NODE_BINARY") ?: System.getenv("NODE_BINARY")
+def pathEnv = System.getenv("PATH") ?: ""
+def nvmBin = System.getenv("NVM_BIN")
+
+def findInPath = { String exeName ->
+  if (!pathEnv) return null
+  def parts = pathEnv.split(":")
+  for (def i = 0; i < parts.length; i++) {
+    def dir = parts[i]
+    if (!dir) continue
+    def f = new File(dir, exeName)
+    if (f.exists() && f.canExecute()) return f.absolutePath
+  }
+  return null
+}
+
+def candidates = [
+  envNode,
+  // NVM (если Android Studio унаследовал NVM_BIN)
+  nvmBin ? "${nvmBin}/node" : null,
+  // Homebrew (Apple Silicon / Intel)
+  "/opt/homebrew/bin/node",
+  "/usr/local/bin/node",
+  // Volta
+  "${home}/.volta/bin/node",
+  // asdf shims
+  "${home}/.asdf/shims/node",
+  // Node.js installer (framework)
+  "/Library/Frameworks/Nodejs.framework/Versions/Current/bin/node",
+  // PATH fallback
+  findInPath("node"),
+].findAll { it != null && it.toString().trim().length() > 0 }
+
+def pickExisting = { List<String> list ->
+  for (def i = 0; i < list.size(); i++) {
+    def p = list[i]
+    if (p == null) continue
+    def f = new File(p.toString())
+    if (f.exists() && f.isFile()) return f.absolutePath
+  }
+  return null
+}
+
+def nodeBinary = pickExisting(candidates)
+
+// NVM (самый частый кейс на macOS): ~/.nvm/versions/node/vX.Y.Z/bin/node
+if (nodeBinary == null) {
+  def nvmVersionsDir = new File("${home}/.nvm/versions/node")
+  if (nvmVersionsDir.exists() && nvmVersionsDir.isDirectory()) {
+    def versionDirs = (nvmVersionsDir.listFiles() ?: []) as File[]
+    def parsed = []
+    versionDirs.each { dir ->
+      if (dir != null && dir.isDirectory() && dir.name.startsWith("v")) {
+        def m = (dir.name =~ /^v(\d+)(?:\.(\d+))?(?:\.(\d+))?$/)
+        if (m.matches()) {
+          def major = Integer.parseInt(m[0][1])
+          def minor = Integer.parseInt(m[0][2] ?: "0")
+          def patch = Integer.parseInt(m[0][3] ?: "0")
+          parsed.add([major, minor, patch, dir])
+        }
+      }
+    }
+    if (!parsed.isEmpty()) {
+      parsed.sort { a, b ->
+        if (a[0] != b[0]) return a[0] <=> b[0]
+        if (a[1] != b[1]) return a[1] <=> b[1]
+        return a[2] <=> b[2]
+      }
+      def bestDir = parsed.last()[3] as File
+      def candidateNode = new File(bestDir, "bin/node")
+      if (candidateNode.exists() && candidateNode.isFile()) {
+        nodeBinary = candidateNode.absolutePath
+      }
+    }
+  }
+}
+
+if (nodeBinary == null) {
+  throw new GradleException(
+    "Node.js binary not found for React Native autolinking.\n" +
+    "Fix options:\n" +
+    "1) Set REACT_NATIVE_NODE_BINARY to absolute path of node (e.g. /Users/<you>/.nvm/versions/node/v20.x.x/bin/node)\n" +
+    "2) Or install Node via Homebrew (so it appears in /opt/homebrew/bin/node)\n" +
+    "Then re-sync Gradle."
+  )
+}
+
+def rnCli = file("../node_modules/react-native/cli.js")
+if (!rnCli.exists()) {
+  throw new GradleException("React Native CLI not found at: " + rnCli.absolutePath)
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+  ex.autolinkLibrariesFromCommand([nodeBinary.toString(), rnCli.absolutePath, "config"])
+}
+
 rootProject.name = 'app'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

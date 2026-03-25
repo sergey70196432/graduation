@@ -22,6 +22,7 @@ export type FrameSize = {
 export type DetectorStats = {
   fps: number;
   lastInferenceMs: number;
+  lastTotalMs: number;
   lastNumDetections: number;
   lastUpdatedAtMs: number;
   inputSize: number;
