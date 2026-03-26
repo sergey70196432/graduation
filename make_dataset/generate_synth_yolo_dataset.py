@@ -33,60 +33,80 @@ BACKGROUNDS_DIR = "make_dataset/backgrounds"
 # Кадры с видеорегистратора (лучшие фоны для домена). Можно указать папку с jpg/png.
 # Файлы ищутся РЕКУРСИВНО. Если папка не задана или пустая — используем BACKGROUNDS_DIR.
 DASHCAM_FRAMES_DIR = "make_dataset/dashcam_frames"
-SIGNS_IMAGES_DIR = "make_dataset/signs/images"
-SPLITS_DIR = "make_dataset/signs/splits"
-CSV_PATH = "make_dataset/signs/signs.csv"
+SIGNS_IMAGES_DIR = "shared/signs/images"  # папка с базовыми изображениями знаков (если у класса нет splits-вариаций)
+SPLITS_DIR = "shared/signs/splits"        # папка с подпапками вариаций: splits/<name>/*.(png/jpg/svg)
+CSV_PATH = "shared/signs/signs.csv"       # CSV с колонками filename,class_id,class_name
 
 OUTPUT_BASE = "datasets/dataset"  # папки будут dataset_1, dataset_2, ...
 MIN_IMAGES_PER_CLASS = 20         # минимум на класс
 VAL_RATIO = 0.2                   # доля val на класс (для train.txt/val.txt)
-WEATHER_PROB = 0.7                # вероятность погодного эффекта
-RANDOM_SEED = 1337
+WEATHER_PROB = 0.7                # вероятность погодного эффекта на кадре (дождь/снег/туман)
+RANDOM_SEED = 1337                # фиксируем seed для воспроизводимости
 
 # Если список пустой — генерируем все классы из CSV.
 # Если указать, например [0, 4, 10], то будут использоваться только эти class_id.
-SELECT_CLASS_IDS = []  # пример: [0, 4, 10]
+SELECT_CLASS_IDS = [67,68]  # пример: [0, 4, 10]
 
 # Диапазоны аугментаций
 # Для видеорегистратора знаки чаще маленькие, поэтому диапазон обычно ниже.
-SCALE_RANGE = (0.02, 0.20)        # ширина знака как доля ширины фона
+SCALE_RANGE = (0.05, 0.20)        # ширина знака как доля ширины фона
 SCALE_BIAS_POWER = 2.2            # >1 => чаще маленькие (u**power)
 ROLL_ANGLE_RANGE = (-30.0, 30.0)  # поворот в плоскости
 PERSPECTIVE_STRENGTH = 0.10       # перспектива (наклон)
 SHIFT_FRACTION = 0.08             # небольшой сдвиг после преобразований
 
 # Размещение
-RIGHT_HALF_PROB = 0.7
-MIN_VISIBLE_AREA_FRACTION = 0.60
-MAX_PLACEMENT_TRIES = 10
+RIGHT_HALF_PROB = 0.7              # вероятность, что знак будет в правой половине кадра (x_center > 0.5)
+MIN_VISIBLE_AREA_FRACTION = 0.60   # минимум видимой площади знака (0..1), иначе пробуем другую позицию
+MAX_PLACEMENT_TRIES = 10           # число попыток разместить знак на фоне, прежде чем сдаться
 
 # Негативные примеры (кадры без знаков). Для YOLO это важно, чтобы не было ложных срабатываний.
-NEGATIVE_RATIO = 0.30  # доля негативных изображений от общего числа с разметкой (примерно)
+NEGATIVE_RATIO = 0.1  # доля негативных изображений (без знаков) относительно числа сгенерированных кадров (примерно)
 
 # Несколько знаков на одном изображении (как на реальных кадрах видеорегистратора)
 MULTI_OBJECT_ENABLED = True
-EXTRA_OBJECTS_RANGE = (0, 5)       # сколько ДОПОЛНИТЕЛЬНЫХ знаков добавлять к основному (0..5)
-EXTRA_SAME_CLASS_PROB = 0.35       # шанс, что доп. знак будет того же класса, что и основной
+EXTRA_OBJECTS_RANGE = (0, 3)       # сколько ДОПОЛНИТЕЛЬНЫХ знаков добавлять к основному (0..5)
+EXTRA_SAME_CLASS_PROB = 0.15       # шанс, что доп. знак будет того же класса, что и основной
 MAX_IOU_BETWEEN_SIGNS = 0.25       # ограничение пересечений bbox между знаками
 MAX_EXTRA_TRIES = 25               # попыток размещения одного доп. знака
 
 # Эффекты "камеры" видеорегистратора (умеренно)
-CAMERA_EFFECTS_PROB = 0.90
-JPEG_QUALITY_RANGE = (35, 95)
-NOISE_STD_RANGE = (0.0, 8.0)  # шум (в яркостных единицах 0..255)
-GAUSS_BLUR_PROB = 0.25
-MOTION_BLUR_PROB = 0.25
-VIGNETTE_PROB = 0.20
-COLOR_JITTER_PROB = 0.35
+CAMERA_EFFECTS_PROB = 0.90           # вероятность применить набор "камерных" эффектов к кадру
+JPEG_QUALITY_RANGE = (35, 95)        # качество JPEG при пережатии кадра (меньше => сильнее артефакты)
+NOISE_STD_RANGE = (0.0, 8.0)         # sigma шума (в единицах яркости 0..255)
+GAUSS_BLUR_PROB = 0.25               # вероятность лёгкого Gaussian blur (как defocus/стабилизация)
+MOTION_BLUR_PROB = 0.25              # вероятность motion blur (смаз от движения)
+VIGNETTE_PROB = 0.20                 # вероятность виньетки (потемнение по краям)
+COLOR_JITTER_PROB = 0.35             # вероятность сдвигов яркости/контраста/насыщенности (автоэкспозиция/ББ)
 
 # Небольшая тень и "смягчение" краёв знака (чтобы не было идеально вырезанного контура)
-SHADOW_PROB = 0.70
+SHADOW_PROB = 0.70                      # вероятность добавить тень от знака на фон
 SHADOW_STRENGTH_RANGE = (0.20, 0.55)  # насколько затемнять фон
 SHADOW_BLUR_RANGE = (3, 11)           # нечётное число
-SHADOW_OFFSET_X_RANGE = (-6, 6)
-SHADOW_OFFSET_Y_RANGE = (2, 10)
-EDGE_BLUR_PROB = 0.30
-EDGE_BLUR_K_RANGE = (1, 3)  # гаусс, сигма
+SHADOW_OFFSET_X_RANGE = (-6, 6)         # сдвиг тени по X (пиксели, в ROI знака)
+SHADOW_OFFSET_Y_RANGE = (2, 10)         # сдвиг тени по Y (пиксели, в ROI знака)
+EDGE_BLUR_PROB = 0.30                   # вероятность дополнительно размыть RGB знака (альфу не трогаем)
+EDGE_BLUR_K_RANGE = (1, 3)              # диапазон sigma для Gaussian blur знака (в пикселях)
+
+# Ухудшение качества знака в зависимости от размера (для маленьких знаков сильнее)
+SIGN_DEGRADE_ENABLED = True
+SIGN_DEGRADE_PROB = 0.95               # вероятность применить деградацию качества к каждому знаку
+# "Размер знака" — ширина bbox по альфе (в пикселях). Всё ниже MIN будет как "очень мелко",
+# всё выше MAX — как "крупно".
+SIGN_DEGRADE_MIN_PX = 35
+SIGN_DEGRADE_MAX_PX = 160
+# JPEG качество для ROI знака (мелкий знак => ниже качество)
+SIGN_JPEG_QUALITY_SMALL = (12, 40)
+SIGN_JPEG_QUALITY_LARGE = (65, 95)
+# Потеря деталей: downscale->upscale (мелкий => сильнее)
+SIGN_DOWNSCALE_SMALL = (0.28, 0.55)
+SIGN_DOWNSCALE_LARGE = (0.85, 1.00)
+# Размытие: мелкий => сильнее
+SIGN_BLUR_SIGMA_SMALL = (0.6, 1.8)
+SIGN_BLUR_SIGMA_LARGE = (0.0, 0.6)
+# Шум: мелкий => сильнее
+SIGN_NOISE_STD_SMALL = (1.0, 10.0)
+SIGN_NOISE_STD_LARGE = (0.0, 3.0)
 
 # Цветокоррекция по яркости фона под знаком
 BRIGHTNESS_DARK_THRESH = 90.0
@@ -423,6 +443,90 @@ def add_gaussian_noise(img_bgr, std):
     noise = np.random.normal(0.0, std, img_bgr.shape).astype(np.float32)
     out = img_bgr.astype(np.float32) + noise
     return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def clamp(x, a, b):
+    return max(a, min(b, x))
+
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def sample_interp_range(r_small, r_large, t):
+    """
+    Интерполируем диапазоны (low, high) между "мелко" и "крупно",
+    потом выбираем случайное значение внутри интерполированного диапазона.
+    t=0 => мелкий знак, t=1 => крупный знак.
+    """
+    lo = lerp(float(r_small[0]), float(r_large[0]), float(t))
+    hi = lerp(float(r_small[1]), float(r_large[1]), float(t))
+    if hi < lo:
+        lo, hi = hi, lo
+    return random.uniform(lo, hi)
+
+
+def degrade_sign_by_size(sign_rgba, sign_bbox_w_px):
+    """
+    Ухудшаем качество знака (только в области непрозрачных пикселей), причём
+    чем меньше знак по размеру — тем сильнее деградация.
+    """
+    if not SIGN_DEGRADE_ENABLED:
+        return sign_rgba
+    if random.random() > SIGN_DEGRADE_PROB:
+        return sign_rgba
+
+    alpha = sign_rgba[:, :, 3]
+    bb = alpha_bbox(alpha, thr=ALPHA_THRESHOLD)
+    if bb is None:
+        return sign_rgba
+    x1, y1, x2, y2 = bb
+    w = int(x2 - x1 + 1)
+    h = int(y2 - y1 + 1)
+    if w < 2 or h < 2:
+        return sign_rgba
+
+    # Нормализуем размер: t=0 (мелко) .. t=1 (крупно)
+    t = 0.0
+    if SIGN_DEGRADE_MAX_PX > SIGN_DEGRADE_MIN_PX:
+        t = (float(sign_bbox_w_px) - float(SIGN_DEGRADE_MIN_PX)) / float(SIGN_DEGRADE_MAX_PX - SIGN_DEGRADE_MIN_PX)
+    t = clamp(t, 0.0, 1.0)
+
+    roi = sign_rgba[y1 : y2 + 1, x1 : x2 + 1].copy()
+    roi_rgb = roi[:, :, :3]
+    roi_a = roi[:, :, 3:4]
+
+    # Работаем в BGR для OpenCV
+    roi_bgr = roi_rgb[:, :, ::-1].copy()
+
+    # 1) Downscale -> Upscale (потеря деталей)
+    s = sample_interp_range(SIGN_DOWNSCALE_SMALL, SIGN_DOWNSCALE_LARGE, t)
+    s = clamp(s, 0.15, 1.0)
+    if s < 0.999:
+        nw = max(2, int(w * s))
+        nh = max(2, int(h * s))
+        tmp = cv2.resize(roi_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+        roi_bgr = cv2.resize(tmp, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    # 2) Blur (мелкий знак сильнее)
+    sigma = sample_interp_range(SIGN_BLUR_SIGMA_SMALL, SIGN_BLUR_SIGMA_LARGE, t)
+    if sigma > 0.05:
+        roi_bgr = cv2.GaussianBlur(roi_bgr, (0, 0), sigmaX=float(sigma))
+
+    # 3) Noise (мелкий знак сильнее)
+    std = sample_interp_range(SIGN_NOISE_STD_SMALL, SIGN_NOISE_STD_LARGE, t)
+    roi_bgr = add_gaussian_noise(roi_bgr, std)
+
+    # 4) JPEG артефакты (локально)
+    q = int(round(sample_interp_range(SIGN_JPEG_QUALITY_SMALL, SIGN_JPEG_QUALITY_LARGE, t)))
+    roi_bgr = apply_jpeg_compression(roi_bgr, q)
+
+    # Возвращаем обратно в RGBA, альфу не трогаем
+    out = sign_rgba.copy()
+    out_roi_rgb = roi_bgr[:, :, ::-1]
+    out[y1 : y2 + 1, x1 : x2 + 1, :3] = out_roi_rgb
+    out[y1 : y2 + 1, x1 : x2 + 1, 3:4] = roi_a
+    return out
 
 
 def apply_motion_blur(img_bgr, k):
@@ -768,6 +872,12 @@ def place_one_object(bg, state, template_cache, existing_bboxes, max_tries=MAX_P
 
     sign = resize_sign(rgba, bg_w)
     sign = augment_affine(sign)
+
+    # Деградация качества знака в зависимости от его размера (после аугментаций)
+    bb0 = alpha_bbox(sign[:, :, 3], thr=ALPHA_THRESHOLD)
+    if bb0 is not None:
+        w0 = int(bb0[2] - bb0[0] + 1)
+        sign = degrade_sign_by_size(sign, w0)
 
     # Иногда слегка размываем знак, чтобы края не были "идеально вырезанными"
     if random.random() < EDGE_BLUR_PROB:
