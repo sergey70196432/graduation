@@ -21,6 +21,7 @@ import { useYoloDetector } from '../hooks/useYoloDetector';
 import type { Detection } from '../types/detection';
 import type { FrameSize } from '../types/detection';
 import Svg, { Circle, Path, Rect as SvgRect, Text as SvgText } from 'react-native-svg';
+import { signByLabel } from '../signs/signRegistry';
 
 type CameraExtraProps = {
   /**
@@ -28,6 +29,12 @@ type CameraExtraProps = {
    * the camera can appear above other React Native views.
    */
   androidPreviewViewType?: 'surface-view' | 'texture-view';
+
+  /**
+   * Some VisionCamera versions expose this prop, but typings can lag behind.
+   * We keep it here to be able to throttle frameProcessor calls.
+   */
+  frameProcessorFps?: number;
 };
 
 const CameraView = Camera as unknown as React.ComponentType<
@@ -235,9 +242,10 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                   style={StyleSheet.absoluteFill}
                   device={device}
                   isActive={true}
-                  frameProcessor={isDetecting ? frameProcessor : undefined}
-                  frameProcessorFps={isDetecting ? frameProcessorFps : undefined}
-                  androidPreviewViewType={Platform.OS === 'android' ? 'texture-view' : undefined}
+                  {...(isDetecting ? { frameProcessor, frameProcessorFps } : {})}
+                  {...(Platform.OS === 'android'
+                    ? ({ androidPreviewViewType: 'texture-view' } as const)
+                    : {})}
                   resizeMode="contain"
                 />
 
@@ -368,6 +376,11 @@ function SignSvg(props: { label: string; confidence: number }) {
   const pct = Math.round(conf * 100);
   const short =
     props.label.length > 10 ? props.label.slice(0, 10).trim() + '…' : props.label;
+
+  const Sign = signByLabel[props.label];
+  if (Sign) {
+    return <Sign width={54} height={54} />;
+  }
 
   return (
     <Svg width={54} height={54} viewBox="0 0 54 54">

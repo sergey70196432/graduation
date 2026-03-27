@@ -76,3 +76,5 @@ yarn-error.log
 
 assets/models/*
 !assets/models/.gitkeep
+
+src/signs/signRegistry.tsx
