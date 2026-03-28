@@ -33,7 +33,7 @@ SELECT_CLASS_IDS = []  # пример: [0, 4, 10]
 
 # ===================== Внешний датасет (YOLO) =====================
 EXTERNAL_MIX_ENABLED = True
-EXTERNAL_DATASET_DIR = "make_dataset/external_dataset/Road Sign-3"
+EXTERNAL_DATASET_DIR = "make_dataset/external_dataset/*"
 EXTERNAL_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # ===================== Геометрия / аугментации =====================
@@ -67,6 +67,22 @@ ALLOW_EXTRA_NON_SELECTED_CLASSES = False
 USE_MULTITHREADING = True
 NUM_WORKERS = max(1, (os.cpu_count() or 4) - 1)
 MAX_INFLIGHT_TASKS = None  # None => NUM_WORKERS
+
+# ===================== Память / скорость =====================
+# Потоковая запись train.txt/val.txt вместо накопления списков в памяти (важно для больших датасетов).
+STREAM_SPLITS_TO_DISK = True
+
+# Ограничиваем кэш шаблонов (RGBA) в каждом рабочем потоке.
+# Иначе при большом числе классов/вариаций память может расти до десятков ГБ.
+TEMPLATE_CACHE_MAX_ITEMS_PER_THREAD = 96
+
+# Размер рендера SVG в пикселях (квадрат). Чем больше — тем больше RAM и время.
+# Обычно знак всё равно уменьшается до небольшого размера на фоне, поэтому 512 хватает.
+SVG_RENDER_PX = 512
+
+# Быстрее писать PNG (меньше CPU), но файлы немного больше.
+# 0..9, где 0 — без сжатия, 9 — максимум.
+PNG_COMPRESSION = 1
 
 # ===================== Эффекты камеры (видеорегистратор) =====================
 CAMERA_EFFECTS_PROB = 0.90

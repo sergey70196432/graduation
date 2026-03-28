@@ -3,6 +3,7 @@ import sys
 import csv
 import random
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from collections import OrderedDict
 
 import numpy as np
 
@@ -87,15 +88,21 @@ def generate_dataset():
 
     write_classes_txt(out_dir, all_classes)
 
-    train_list = []
-    val_list = []
+    stream_splits = bool(getattr(cfg, "STREAM_SPLITS_TO_DISK", False))
+    train_list = None if stream_splits else []
+    val_list = None if stream_splits else []
+    train_f = None
+    val_f = None
+    if stream_splits:
+        train_f = open(os.path.join(out_dir, "train.txt"), "w", encoding="utf-8")
+        val_f = open(os.path.join(out_dir, "val.txt"), "w", encoding="utf-8")
 
     ann_csv_path = os.path.join(out_dir, "annotations.csv")
     ann_f = open(ann_csv_path, "w", encoding="utf-8", newline="")
     ann_w = csv.writer(ann_f)
     ann_w.writerow(["image_file", "class_id", "x_center", "y_center", "width", "height"])
 
-    template_cache = {}
+    template_cache = OrderedDict()
     unique_idx = 0
 
     id_to_code = {int(c["class_id"]): str(c["name"]) for c in all_classes}
@@ -131,6 +138,8 @@ def generate_dataset():
             val_list=val_list,
             ann_w=ann_w,
             unique_idx_ref=unique_idx_ref,
+            train_f=train_f,
+            val_f=val_f,
         )
         unique_idx = unique_idx_ref[0]
         for cid, cnt in imported_counts.items():
@@ -196,9 +205,15 @@ def generate_dataset():
 
                         rel_img_path, labels = res
                         if random.random() < cfg.VAL_RATIO:
-                            val_list.append(rel_img_path)
+                            if val_list is not None:
+                                val_list.append(rel_img_path)
+                            elif val_f is not None:
+                                val_f.write(rel_img_path + "\n")
                         else:
-                            train_list.append(rel_img_path)
+                            if train_list is not None:
+                                train_list.append(rel_img_path)
+                            elif train_f is not None:
+                                train_f.write(rel_img_path + "\n")
 
                         for (cid, xc, yc, ww, hh) in labels:
                             cid_i = int(cid)
@@ -234,9 +249,15 @@ def generate_dataset():
                 rel_img_path = save_sample(out_dir, img_bgr, unique_idx, labels, id_to_code)
 
                 if random.random() < cfg.VAL_RATIO:
-                    val_list.append(rel_img_path)
+                    if val_list is not None:
+                        val_list.append(rel_img_path)
+                    elif val_f is not None:
+                        val_f.write(rel_img_path + "\n")
                 else:
-                    train_list.append(rel_img_path)
+                    if train_list is not None:
+                        train_list.append(rel_img_path)
+                    elif train_f is not None:
+                        train_f.write(rel_img_path + "\n")
 
                 for (cid, xc, yc, ww, hh) in labels:
                     cid_i = int(cid)
@@ -266,11 +287,30 @@ def generate_dataset():
             unique_idx += 1
             rel_img_path = save_negative_sample(out_dir, bg, unique_idx)
             if random.random() < cfg.VAL_RATIO:
-                val_list.append(rel_img_path)
+                if val_list is not None:
+                    val_list.append(rel_img_path)
+                else:
+                    # train/val уже открыт выше, но на всякий случай пишем безопасно
+                    if val_f is not None:
+                        val_f.write(rel_img_path + "\n")
+                    else:
+                        with open(os.path.join(out_dir, "val.txt"), "a", encoding="utf-8") as f:
+                            f.write(rel_img_path + "\n")
             else:
-                train_list.append(rel_img_path)
+                if train_list is not None:
+                    train_list.append(rel_img_path)
+                else:
+                    if train_f is not None:
+                        train_f.write(rel_img_path + "\n")
+                    else:
+                        with open(os.path.join(out_dir, "train.txt"), "a", encoding="utf-8") as f:
+                            f.write(rel_img_path + "\n")
 
     write_dataset_yaml_and_splits(out_dir, all_classes, train_list, val_list)
+    if train_f is not None:
+        train_f.close()
+    if val_f is not None:
+        val_f.close()
 
     # Краткая сводка + подробный файл
     imported_total = int(sum(int(v) for v in imported_counts.values()))

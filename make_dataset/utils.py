@@ -10,6 +10,7 @@ import tempfile
 import ast
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from collections import OrderedDict
 from glob import glob
 
 import cv2
@@ -250,12 +251,17 @@ def yaml_quote(s):
 def write_dataset_yaml_and_splits(out_dir, classes, train_list, val_list):
     train_txt = os.path.join(out_dir, "train.txt")
     val_txt = os.path.join(out_dir, "val.txt")
-    with open(train_txt, "w", encoding="utf-8") as f:
-        for p in train_list:
-            f.write(p + "\n")
-    with open(val_txt, "w", encoding="utf-8") as f:
-        for p in val_list:
-            f.write(p + "\n")
+
+    # Для больших датасетов списки путей могут занимать много памяти.
+    # Если train_list/val_list = None, считаем что файлы train.txt/val.txt уже записаны потоково.
+    if train_list is not None:
+        with open(train_txt, "w", encoding="utf-8") as f:
+            for p in train_list:
+                f.write(p + "\n")
+    if val_list is not None:
+        with open(val_txt, "w", encoding="utf-8") as f:
+            for p in val_list:
+                f.write(p + "\n")
 
     max_id = max(int(c["class_id"]) for c in classes)
     names = [""] * (max_id + 1)
@@ -335,13 +341,16 @@ def pil_enhance_rgba(sign_rgba, brightness=1.0, contrast=1.0, color=1.0):
     return np.array(out, dtype=np.uint8)
 
 
-def render_svg_to_rgba(svg_path, render_px=1024):
+def render_svg_to_rgba(svg_path, render_px=None):
     """
     SVG -> RGBA.
     1) cairosvg (если есть)
     2) rsvg-convert (если установлен)
     3) inkscape (если установлен)
     """
+    if render_px is None:
+        render_px = int(getattr(cfg, "SVG_RENDER_PX", 512))
+
     if HAS_CAIROSVG:
         with open(svg_path, "rb") as f:
             svg_bytes = f.read()
@@ -387,7 +396,7 @@ def render_svg_to_rgba(svg_path, render_px=1024):
     return None
 
 
-def load_template_rgba(path, render_px=1024):
+def load_template_rgba(path, render_px=None):
     ext = os.path.splitext(path)[1].lower()
     try:
         if ext == ".svg":
@@ -606,6 +615,20 @@ def place_one_object(bg, state, template_cache, existing_bboxes, max_tries=cfg.M
             return None
         template_cache[tpl] = rgba
 
+    # LRU-очистка кэша шаблонов (важно для RAM)
+    if hasattr(template_cache, "move_to_end"):
+        try:
+            template_cache.move_to_end(tpl)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        max_items = int(getattr(cfg, "TEMPLATE_CACHE_MAX_ITEMS_PER_THREAD", 0) or 0)
+        if max_items > 0:
+            try:
+                while len(template_cache) > max_items:
+                    template_cache.popitem(last=False)  # type: ignore[arg-type]
+            except Exception:
+                pass
+
     sign = resize_sign(rgba, bg_w)
     sign = augment_affine(sign)
 
@@ -735,7 +758,11 @@ def save_sample(out_dir, image_bgr, unique_idx, labels, id_to_code):
     img_path = os.path.join(out_dir, "images", img_file)
     lbl_path = os.path.join(out_dir, "labels", os.path.splitext(img_file)[0] + ".txt")
 
-    ok = cv2.imwrite(img_path, image_bgr)
+    ok = cv2.imwrite(
+        img_path,
+        image_bgr,
+        [int(cv2.IMWRITE_PNG_COMPRESSION), int(getattr(cfg, "PNG_COMPRESSION", 3))],
+    )
     if not ok:
         raise RuntimeError(f"Не удалось записать изображение: {img_path}")
 
@@ -751,7 +778,11 @@ def save_negative_sample(out_dir, image_bgr, unique_idx):
     img_path = os.path.join(out_dir, "images", img_file)
     lbl_path = os.path.join(out_dir, "labels", os.path.splitext(img_file)[0] + ".txt")
 
-    ok = cv2.imwrite(img_path, image_bgr)
+    ok = cv2.imwrite(
+        img_path,
+        image_bgr,
+        [int(cv2.IMWRITE_PNG_COMPRESSION), int(getattr(cfg, "PNG_COMPRESSION", 3))],
+    )
     if not ok:
         raise RuntimeError(f"Не удалось записать изображение: {img_path}")
     with open(lbl_path, "w", encoding="utf-8") as f:
@@ -764,7 +795,7 @@ _thread_local = threading.local()
 
 def _get_thread_template_cache():
     if not hasattr(_thread_local, "template_cache"):
-        _thread_local.template_cache = {}
+        _thread_local.template_cache = OrderedDict()
     return _thread_local.template_cache
 
 
@@ -916,10 +947,54 @@ def load_external_index(external_dir, our_code_to_id):
 
     unknown_names = set()
     ambiguous_names = set()
+    our_id_set = set(int(v) for v in our_code_to_id.values())
 
     def map_external_code_to_our_id(code):
         if code in our_code_to_id:
             return int(our_code_to_id[code])
+
+        def _split_suffix_num(s: str):
+            """
+            Разделяем строку на (prefix, number) по последнему числовому суффиксу.
+            Примеры:
+            - '1.20.3' -> ('1.20.', 3)
+            - '2.3.7'  -> ('2.3.', 7)
+            Возвращаем None, если суффикс не распарсился.
+            """
+            m = re.match(r"^(.*?)(\d+)$", str(s))
+            if not m:
+                return None
+            return m.group(1), int(m.group(2))
+
+        # 1.5) диапазоны вида '1.20.1-1.20.3' (внешний может содержать '1.20.2')
+        range_hits = []
+        for k, cid in our_code_to_id.items():
+            kk = str(k)
+            if "-" not in kk:
+                continue
+            parts = kk.split("-")
+            if len(parts) != 2:
+                continue
+            a, b = parts[0].strip(), parts[1].strip()
+            sa = _split_suffix_num(a)
+            sb = _split_suffix_num(b)
+            sc = _split_suffix_num(code)
+            if not sa or not sb or not sc:
+                continue
+            pa, na = sa
+            pb, nb = sb
+            pc, nc = sc
+            if pa != pb or pa != pc:
+                continue
+            lo = min(na, nb)
+            hi = max(na, nb)
+            if lo <= nc <= hi:
+                range_hits.append(int(cid))
+        range_hits = sorted(set(range_hits))
+        if len(range_hits) == 1:
+            return range_hits[0]
+        if len(range_hits) > 1:
+            return None
 
         token_hits = []
         for k, cid in our_code_to_id.items():
@@ -978,6 +1053,11 @@ def load_external_index(external_dir, our_code_to_id):
                         unknown_names.add(code)
                     continue
 
+                # защита: берём только те class_id, которые реально есть в shared/signs/signs.csv
+                if int(cid) not in our_id_set:
+                    unknown_names.add(code)
+                    continue
+
                 labels.append((cid, xc, yc, w, h))
 
         if not labels:
@@ -997,7 +1077,18 @@ def load_external_index(external_dir, our_code_to_id):
     return index
 
 
-def import_external_images_for_selected(out_dir, external_index, selected_ids, id_to_code, train_list, val_list, ann_w, unique_idx_ref):
+def import_external_images_for_selected(
+    out_dir,
+    external_index,
+    selected_ids,
+    id_to_code,
+    train_list,
+    val_list,
+    ann_w,
+    unique_idx_ref,
+    train_f=None,
+    val_f=None,
+):
     imported_counts = {}
     imported_class_ids = set()
 
@@ -1029,7 +1120,11 @@ def import_external_images_for_selected(out_dir, external_index, selected_ids, i
         out_img_path = os.path.join(out_dir, "images", img_file)
         out_lbl_path = os.path.join(out_dir, "labels", os.path.splitext(img_file)[0] + ".txt")
 
-        ok = cv2.imwrite(out_img_path, img)
+        ok = cv2.imwrite(
+            out_img_path,
+            img,
+            [int(cv2.IMWRITE_PNG_COMPRESSION), int(getattr(cfg, "PNG_COMPRESSION", 3))],
+        )
         if not ok:
             continue
 
@@ -1039,9 +1134,15 @@ def import_external_images_for_selected(out_dir, external_index, selected_ids, i
 
         rel_img_path = os.path.join("images", img_file)
         if random.random() < cfg.VAL_RATIO:
-            val_list.append(rel_img_path)
+            if val_list is not None:
+                val_list.append(rel_img_path)
+            elif val_f is not None:
+                val_f.write(rel_img_path + "\n")
         else:
-            train_list.append(rel_img_path)
+            if train_list is not None:
+                train_list.append(rel_img_path)
+            elif train_f is not None:
+                train_f.write(rel_img_path + "\n")
 
         for (cid, xc, yc, w, h) in labels:
             imported_class_ids.add(int(cid))
