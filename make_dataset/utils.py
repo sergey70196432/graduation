@@ -1060,3 +1060,65 @@ def generate_dataset():
 
     return _generate_dataset()
 
+
+def fmt_progress(made: int, target: int) -> str:
+    if target <= 0:
+        return f"{made}/{target}"
+    pct = 100.0 * float(made) / float(target)
+    return f"{made}/{target} ({pct:.1f}%)"
+
+
+def count_dir_files(dir_path: str, exts_lower: tuple) -> int:
+    try:
+        return sum(1 for n in os.listdir(dir_path) if os.path.splitext(n)[1].lower() in exts_lower)
+    except Exception:
+        return 0
+
+
+def write_data_stats(
+    out_dir: str,
+    all_classes: list,
+    id_to_code: dict,
+    imported_counts: dict,
+    generated_counts: dict,
+    images_count: int,
+    label_files_count: int,
+):
+    imported_total = int(sum(int(v) for v in (imported_counts or {}).values()))
+    generated_total = int(sum(int(v) for v in (generated_counts or {}).values()))
+    total_objects = imported_total + generated_total
+
+    lines = []
+    lines.append("Детальная статистика датасета")
+    lines.append("")
+    lines.append("Сводка:")
+    lines.append(f"- Сколько объектов сгенерировано: {generated_total}")
+    lines.append(f"- Сколько объектов взято из внешнего датасета: {imported_total}")
+    lines.append(f"- Сколько всего объектов: {total_objects}")
+    lines.append(f"- Сколько изображений в датасете: {images_count}")
+    lines.append(f"- Сколько лейблов (label-файлов): {label_files_count}")
+    lines.append("")
+    lines.append("Таблица по классам (только классы с total > 0):")
+    lines.append("class_id\tcode\tclass_name\texternal\tgenerated\ttotal")
+
+    rows = []
+    for c in sorted(all_classes, key=lambda x: int(x["class_id"])):
+        cid = int(c["class_id"])
+        ext_n = int((imported_counts or {}).get(cid, 0))
+        gen_n = int((generated_counts or {}).get(cid, 0))
+        tot = ext_n + gen_n
+        if tot <= 0:
+            continue
+        code = str(id_to_code.get(cid, c.get("name", f"class_{cid}")))
+        rows.append((cid, code, ext_n, gen_n, tot))
+
+    for (cid, code, ext_n, gen_n, tot) in rows:
+        lines.append(f"{cid}\t{code}\t{ext_n}\t{gen_n}\t{tot}")
+
+    lines.append("")
+    lines.append(f"Всего классов с total > 0: {len(rows)}")
+
+    stats_path = os.path.join(out_dir, "data_stats.txt")
+    with open(stats_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+

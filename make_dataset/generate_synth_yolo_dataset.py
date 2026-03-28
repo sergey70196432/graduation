@@ -19,13 +19,15 @@ if __name__ == "__main__" and __package__ is None:
     # Чтобы корректно работали импорты "from make_dataset import ..."
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from make_dataset import config as cfg  # noqa: E402
-from make_dataset import effects  # noqa: E402
-from make_dataset.utils import (  # noqa: E402
+from make_dataset import config as cfg
+from make_dataset import effects
+from make_dataset.utils import (
     HAS_CAIROSVG,
     build_template_sequence,
     compute_target_count,
+    count_dir_files,
     ensure_output_dir,
+    fmt_progress,
     generate_multi,
     import_external_images_for_selected,
     info,
@@ -40,6 +42,7 @@ from make_dataset.utils import (  # noqa: E402
     warn,
     worker_generate_and_save,
     write_classes_txt,
+    write_data_stats,
     write_dataset_yaml_and_splits,
 )
 
@@ -97,6 +100,9 @@ def generate_dataset():
 
     id_to_code = {int(c["class_id"]): str(c["name"]) for c in all_classes}
 
+    imported_counts = {}
+    generated_counts = {}
+
     state_by_id = {}
     for c in all_classes:
         cid = int(c["class_id"])
@@ -136,9 +142,10 @@ def generate_dataset():
     try:
         selected_states = [state_by_id[cid] for cid in selected_id_set if cid in state_by_id]
         total_target = len(selected_states) * target_instances
-        total_made = sum(s["count"] for s in selected_states)
+        total_made = sum(int(imported_counts.get(int(cid), 0)) for cid in selected_id_set)
         attempts = 0
         max_attempts = total_target * cfg.MAX_ATTEMPTS_MULT
+        last_report_at = -1
 
         if cfg.SELECT_CLASS_IDS and not cfg.ALLOW_EXTRA_NON_SELECTED_CLASSES:
             extra_pool_states = selected_states
@@ -194,11 +201,17 @@ def generate_dataset():
                             train_list.append(rel_img_path)
 
                         for (cid, xc, yc, ww, hh) in labels:
+                            cid_i = int(cid)
                             ann_w.writerow([rel_img_path, cid, f"{xc:.6f}", f"{yc:.6f}", f"{ww:.6f}", f"{hh:.6f}"])
-                            if int(cid) in state_by_id:
-                                state_by_id[int(cid)]["count"] += 1
+                            generated_counts[cid_i] = generated_counts.get(cid_i, 0) + 1
+                            if cid_i in state_by_id:
+                                state_by_id[cid_i]["count"] += 1
+                            if cid_i in selected_id_set:
+                                total_made += 1
 
-                        total_made = sum(s["count"] for s in selected_states)
+                        if total_made // cfg.PROGRESS_EVERY_N_OBJECTS != last_report_at // cfg.PROGRESS_EVERY_N_OBJECTS:
+                            info("Прогресс (объекты): " + fmt_progress(total_made, total_target))
+                            last_report_at = total_made
         else:
             while total_made < total_target and attempts < max_attempts:
                 attempts += 1
@@ -226,18 +239,18 @@ def generate_dataset():
                     train_list.append(rel_img_path)
 
                 for (cid, xc, yc, ww, hh) in labels:
+                    cid_i = int(cid)
                     ann_w.writerow([rel_img_path, cid, f"{xc:.6f}", f"{yc:.6f}", f"{ww:.6f}", f"{hh:.6f}"])
-                    if int(cid) in state_by_id:
-                        state_by_id[int(cid)]["count"] += 1
+                    generated_counts[cid_i] = generated_counts.get(cid_i, 0) + 1
+                    if cid_i in state_by_id:
+                        state_by_id[cid_i]["count"] += 1
+                    if cid_i in selected_id_set:
+                        total_made += 1
 
-                total_made = sum(s["count"] for s in selected_states)
+                if total_made // cfg.PROGRESS_EVERY_N_OBJECTS != last_report_at // cfg.PROGRESS_EVERY_N_OBJECTS:
+                    info("Прогресс (объекты): " + _fmt_progress(total_made, total_target))
+                    last_report_at = total_made
 
-        for s in selected_states:
-            c = s["cls"]
-            if s["count"] < s["target"]:
-                warn(f"Класс id={c['class_id']} набрал {s['count']}/{s['target']} экземпляров.")
-            else:
-                info(f"Класс id={c['class_id']}: {s['count']}/{s['target']} экземпляров.")
     finally:
         ann_f.close()
 
@@ -258,6 +271,34 @@ def generate_dataset():
                 train_list.append(rel_img_path)
 
     write_dataset_yaml_and_splits(out_dir, all_classes, train_list, val_list)
+
+    # Краткая сводка + подробный файл
+    imported_total = int(sum(int(v) for v in imported_counts.values()))
+    generated_total = int(sum(int(v) for v in generated_counts.values()))
+    total_objects = imported_total + generated_total
+
+    images_dir = os.path.join(out_dir, "images")
+    labels_dir = os.path.join(out_dir, "labels")
+    images_count = count_dir_files(images_dir, (".png", ".jpg", ".jpeg", ".bmp", ".webp"))
+    label_files_count = count_dir_files(labels_dir, (".txt",))
+
+    info("Статистика:")
+    info(f"- Сколько объектов сгенерировано: {generated_total}")
+    info(f"- Сколько объектов взято из внешнего датасета: {imported_total}")
+    info(f"- Сколько всего объектов: {total_objects}")
+    info(f"- Сколько изображений в датасете: {images_count}")
+    info(f"- Сколько лейблов (label-файлов): {label_files_count}")
+
+    write_data_stats(
+        out_dir=out_dir,
+        all_classes=all_classes,
+        id_to_code=id_to_code,
+        imported_counts=imported_counts,
+        generated_counts=generated_counts,
+        images_count=images_count,
+        label_files_count=label_files_count,
+    )
+
     info("Готово.")
     return out_dir
 

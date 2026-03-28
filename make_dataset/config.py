@@ -5,6 +5,9 @@ import os
 # ============================================================
 # Правьте параметры тут.
 
+# ===================== Количество объектов для отчета прогресса =====================
+PROGRESS_EVERY_N_OBJECTS = 25
+
 # ===================== Пути =====================
 BACKGROUNDS_DIR = "make_dataset/backgrounds"
 
@@ -117,4 +120,3 @@ MAX_ATTEMPTS_MULT = 12  # попыток = total_target * MAX_ATTEMPTS_MULT
 
 TEMPLATE_EXTS = (".png", ".jpg", ".jpeg", ".svg")
 BACKGROUND_EXTS = (".png", ".jpg", ".jpeg")
-
