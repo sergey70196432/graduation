@@ -47,8 +47,6 @@ from make_dataset.utils import (
     write_dataset_yaml_and_splits,
 )
 
-__all__ = ["generate_dataset"]
-
 
 def generate_dataset():
     random.seed(cfg.RANDOM_SEED)
@@ -149,6 +147,7 @@ def generate_dataset():
                     state_by_id[cid]["target"] = state_by_id[cid]["count"]
 
     try:
+        info("Начало генерации изображений")
         selected_states = [state_by_id[cid] for cid in selected_id_set if cid in state_by_id]
         total_target = len(selected_states) * target_instances
         total_made = sum(int(imported_counts.get(int(cid), 0)) for cid in selected_id_set)
@@ -225,7 +224,7 @@ def generate_dataset():
                                 total_made += 1
 
                         if total_made // cfg.PROGRESS_EVERY_N_OBJECTS != last_report_at // cfg.PROGRESS_EVERY_N_OBJECTS:
-                            info("Прогресс (объекты): " + fmt_progress(total_made, total_target))
+                            info("Прогресс (объекты): " + fmt_progress(total_made, total_target), end="\r")
                             last_report_at = total_made
         else:
             while total_made < total_target and attempts < max_attempts:
@@ -269,7 +268,7 @@ def generate_dataset():
                         total_made += 1
 
                 if total_made // cfg.PROGRESS_EVERY_N_OBJECTS != last_report_at // cfg.PROGRESS_EVERY_N_OBJECTS:
-                    info("Прогресс (объекты): " + _fmt_progress(total_made, total_target))
+                    info("Прогресс (объекты): " + fmt_progress(total_made, total_target), end="\r")
                     last_report_at = total_made
 
     finally:

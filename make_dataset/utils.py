@@ -29,8 +29,8 @@ except Exception:
     HAS_CAIROSVG = False
 
 
-def info(msg):
-    print("[INFO]", msg)
+def info(*msg, end=None):
+    print("[INFO]", *msg, end=end)
 
 
 def warn(msg):

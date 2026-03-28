@@ -38,26 +38,26 @@ EXTERNAL_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # ===================== Геометрия / аугментации =====================
 # Для видеорегистратора знаки чаще маленькие, поэтому диапазон обычно ниже.
-SCALE_RANGE = (0.05, 0.20)        # ширина знака как доля ширины фона
+SCALE_RANGE = (0.05, 0.5)         # ширина знака как доля ширины фона
 SCALE_BIAS_POWER = 2.2            # >1 => чаще маленькие (u**power)
-ROLL_ANGLE_RANGE = (-30.0, 30.0)  # поворот в плоскости
+ROLL_ANGLE_RANGE = (-40.0, 40.0)  # поворот в плоскости
 PERSPECTIVE_STRENGTH = 0.10       # перспектива (наклон)
 SHIFT_FRACTION = 0.08             # небольшой сдвиг после преобразований
 
 # Размещение
-RIGHT_HALF_PROB = 0.7              # шанс, что знак окажется в правой половине кадра
+RIGHT_HALF_PROB = 0.8              # шанс, что знак окажется в правой половине кадра
 MIN_VISIBLE_AREA_FRACTION = 0.60   # минимум видимой площади знака (0..1)
 MAX_PLACEMENT_TRIES = 10           # попыток размещения знака
 
 # Негативные примеры (кадры без знаков)
-NEGATIVE_RATIO = 0.1
+NEGATIVE_RATIO = 0
 
 # Несколько знаков на одном изображении
 MULTI_OBJECT_ENABLED = True
-EXTRA_OBJECTS_RANGE = (0, 3)       # сколько ДОП. знаков добавлять к основному
-EXTRA_SAME_CLASS_PROB = 0.15       # шанс, что доп. знак будет того же класса
-MAX_IOU_BETWEEN_SIGNS = 0.25       # ограничение пересечений bbox между знаками
-MAX_EXTRA_TRIES = 25               # попыток разместить доп. знак
+EXTRA_OBJECTS_RANGE = (0, 2)       # сколько ДОП. знаков добавлять к основному
+EXTRA_SAME_CLASS_PROB = 0.1        # шанс, что доп. знак будет того же класса
+MAX_IOU_BETWEEN_SIGNS = 0.3        # ограничение пересечений bbox между знаками
+MAX_EXTRA_TRIES = 12               # попыток разместить доп. знак
 
 # Если выбран конкретный список классов (SELECT_CLASS_IDS), то по умолчанию дополнительные знаки
 # будут выбираться ТОЛЬКО из этих классов (иначе можно случайно "зацепить" любой class_id).
@@ -65,7 +65,7 @@ ALLOW_EXTRA_NON_SELECTED_CLASSES = False
 
 # ===================== Многопоточность =====================
 USE_MULTITHREADING = True
-NUM_WORKERS = max(1, (os.cpu_count() or 4) - 1)
+NUM_WORKERS = max(1, (os.cpu_count() or 4) + 4)
 MAX_INFLIGHT_TASKS = None  # None => NUM_WORKERS
 
 # ===================== Память / скорость =====================
@@ -86,7 +86,7 @@ PNG_COMPRESSION = 1
 
 # ===================== Эффекты камеры (видеорегистратор) =====================
 CAMERA_EFFECTS_PROB = 0.90
-JPEG_QUALITY_RANGE = (35, 95)
+JPEG_QUALITY_RANGE = (15, 95)
 NOISE_STD_RANGE = (0.0, 8.0)
 GAUSS_BLUR_PROB = 0.25
 MOTION_BLUR_PROB = 0.25
@@ -120,7 +120,7 @@ SIGN_NOISE_STD_LARGE = (0.0, 3.0)
 SIGN_PIXELATE_ENABLED = True
 SIGN_PIXELATE_PROB = 0.90
 SIGN_PIXELATE_SCALE_SMALL = (0.18, 0.45)
-SIGN_PIXELATE_SCALE_LARGE = (0.75, 0.95)
+SIGN_PIXELATE_SCALE_LARGE = (0.65, 0.95)
 
 # ===================== Цветокоррекция знака по яркости фона =====================
 BRIGHTNESS_DARK_THRESH = 90.0
