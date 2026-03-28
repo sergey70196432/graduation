@@ -9,6 +9,9 @@ __pycache__
 datasets/*
 !datasets/.gitkeep
 
+make_dataset/external_dataset/*
+!make_dataset/external_dataset/.gitkeep
+
 models/*
 !models/.gitkeep
 

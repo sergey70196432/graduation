@@ -9,21 +9,17 @@ import {
 } from 'react-native';
 import DocumentPicker from 'react-native-document-picker';
 import { createThumbnail } from 'react-native-create-thumbnail';
-import { loadTensorflowModel, type TensorflowModel } from 'react-native-fast-tflite';
+import type { TensorflowModel } from 'react-native-fast-tflite';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as RNFS from 'react-native-fs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Video from 'react-native-video';
-import { YOLO } from '../constants/yolo';
 import { DetectionOverlay } from '../components/DetectionOverlay';
 import type { Detection, FrameSize } from '../types/detection';
-import { loadLabelsFromAsset } from '../utils/labels';
 import { decodeJpegToRgba } from '../utils/jpegDecode.ts';
 import { buildLetterboxedFloatInput } from '../utils/rgbLetterbox.ts';
 import { decodeYoloV8Detections } from '../utils/yoloPostprocess';
-
-const MODEL_ASSET = require('../../assets/models/model_float16.tflite');
-const LABELS_ASSET = require('../../assets/models/labels.txt');
+import { useYoloModel } from '../hooks/useYoloModel';
 
 type Thumb = {
   path: string;
@@ -100,10 +96,15 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
     return Math.max(280, Math.min(380, w));
   }, [isLandscape, windowW]);
 
-  const [model, setModel] = useState<TensorflowModel | null>(null);
-  const [labels, setLabels] = useState<string[]>([]);
-  const [modelError, setModelError] = useState<string | null>(null);
-  const [isLoadingModel, setIsLoadingModel] = useState(true);
+  const {
+    model,
+    labels,
+    modelState,
+    modelErrorMessage,
+    activeYoloParams,
+  } = useYoloModel();
+  const isLoadingModel = modelState === 'loading';
+  const modelError = modelState === 'error' ? modelErrorMessage : null;
 
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [timestampMs, setTimestampMs] = useState<number>(0);
@@ -125,33 +126,6 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
 
   const lastAutoInferAtMsRef = useRef(0);
   const processingRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setIsLoadingModel(true);
-        setModelError(null);
-        const [m, labs] = await Promise.all([
-          loadTensorflowModel(MODEL_ASSET),
-          loadLabelsFromAsset(LABELS_ASSET),
-        ]);
-        if (cancelled) return;
-        setModel(m);
-        setLabels(labs);
-      } catch (e) {
-        if (cancelled) return;
-        setModel(null);
-        setLabels([]);
-        setModelError(String(e));
-      } finally {
-        if (!cancelled) setIsLoadingModel(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const output0Shape = useMemo(() => {
     const s = model?.outputs?.[0]?.shape;
@@ -219,7 +193,7 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
 
   const inferFrame = useCallback(async (params: {
     labels: string[];
-    model: TensorflowModel | null;
+    model: TensorflowModel | undefined;
     output0Shape: number[] | undefined;
     timestampMs: number;
     videoUri: string | null;
@@ -243,8 +217,8 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
         url: vUri,
         timeStamp: tsMs,
         format: 'jpeg',
-        maxWidth: YOLO.inputSize,
-        maxHeight: YOLO.inputSize,
+        maxWidth: activeYoloParams.inputSize,
+        maxHeight: activeYoloParams.inputSize,
         timeToleranceMs: 500,
       });
       setThumb({ path: t.path, width: t.width, height: t.height });
@@ -257,7 +231,7 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
       const startBuildLetterboxedFloatInput = Date.now();
       const { input, letterbox, srcFrameSize } = buildLetterboxedFloatInput(
         decoded,
-        YOLO.inputSize
+        activeYoloParams.inputSize
       );
       console.log('build letterboxed float input time', Date.now() - startBuildLetterboxedFloatInput + 'ms');
 
@@ -280,10 +254,10 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
         labs,
         srcFrameSize,
         letterbox,
-        YOLO.confidenceThreshold,
-        YOLO.iouThreshold,
-        YOLO.preNmsTopK,
-        YOLO.postNmsTopK
+        activeYoloParams.confidenceThreshold,
+        activeYoloParams.iouThreshold,
+        activeYoloParams.preNmsTopK,
+        activeYoloParams.postNmsTopK
       );
 
       console.log('decode time', Date.now() - startDecode + 'ms');
@@ -301,7 +275,7 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
       setIsProcessing(false);
       processingRef.current = false;
     }
-  }, []);
+  }, [activeYoloParams]);
 
   const onInferCurrentFrame = useCallback(async () => {
     if (isProcessing) return;

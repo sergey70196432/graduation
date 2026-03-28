@@ -23,6 +23,14 @@ import type { FrameSize } from '../types/detection';
 import Svg, { Circle, Path, Rect as SvgRect, Text as SvgText } from 'react-native-svg';
 import { signByLabel } from '../signs/signRegistry';
 
+type StickySign = {
+  label: string;
+  classId: number;
+  bestConfidence: number;
+  count: number;
+  lastSeenMs: number;
+};
+
 type CameraExtraProps = {
   /**
    * On Android, using TextureView avoids SurfaceView overlay issues where
@@ -45,6 +53,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
   const insets = useSafeAreaInsets();
   const { width: windowW, height: windowH } = useWindowDimensions();
   const isLandscape = windowW > windowH;
+  const isDevBuild = __DEV__ === true;
   const debugPanelWidth = useMemo(() => {
     if (!isLandscape) return undefined;
     const w = Math.round(windowW * 0.34);
@@ -58,6 +67,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
   const device = useCameraDevice(cameraPosition);
 
   const [isDebug, setIsDebug] = useState(false);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
 
   const {
     frameProcessor,
@@ -70,6 +80,17 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     modelErrorMessage,
     lastFrameSize,
     lastLogFilePath,
+
+    activeModelItem,
+    models,
+    catalogState,
+    catalogErrorMessage,
+    refreshManifest,
+    setActiveModel,
+    ensureDownloaded,
+    deleteDownloaded,
+    downloadProgressById,
+    manifestGeneratedAt,
   } = useYoloDetector();
 
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number }>({
@@ -88,7 +109,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     // На Android (особенно на эмуляторе) тяжёлый frameProcessor легко приводит к ANR.
     // Ограничиваем частоту вызова worklet на уровне VisionCamera.
     if (Platform.OS === 'android') return isDebug ? 2 : 1;
-    return isDebug ? 10 : 6;
+    return isDebug ? 6 : 3;
   }, [isDebug]);
 
   const frameSize: FrameSize | null = useMemo(() => {
@@ -107,6 +128,16 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
   const onOpenVideoTest = useCallback(() => {
     props.onOpenVideoTest?.();
   }, [props]);
+
+  const modelPickerSafePadding = useMemo(() => {
+    // В landscape "ноуч" (Dynamic Island) уезжает влево/вправо, поэтому учитываем safe-area по всем сторонам.
+    return {
+      paddingTop: Math.max(insets.top, 16),
+      paddingBottom: Math.max(insets.bottom, 16),
+      paddingLeft: Math.max(insets.left, 16),
+      paddingRight: Math.max(insets.right, 16),
+    };
+  }, [insets.bottom, insets.left, insets.right, insets.top]);
 
   // В обычном режиме (не debug) детекция включена всегда, чтобы колонка "знаки" жила своей жизнью.
   useEffect(() => {
@@ -150,19 +181,24 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     </View>
   );
 
-  const signs = useMemo(() => {
-    // Группируем детекции по label, берём max confidence + количество.
-    const m = new Map<
+  const SIGN_DEBOUNCE_MS = 3000;
+  const [stickySigns, setStickySigns] = useState<StickySign[]>([]);
+
+  // Обновляем "последний раз увидели" по новым detections.
+  useEffect(() => {
+    const now = Date.now();
+
+    // Группируем текущие детекции по label.
+    const frame = new Map<
       string,
       { label: string; classId: number; bestConfidence: number; count: number }
     >();
     for (let i = 0; i < detections.length; i++) {
       const d = detections[i] as Detection | undefined;
       if (!d) continue;
-      const key = d.label;
-      const prev = m.get(key);
+      const prev = frame.get(d.label);
       if (!prev) {
-        m.set(key, {
+        frame.set(d.label, {
           label: d.label,
           classId: d.classId,
           bestConfidence: d.confidence,
@@ -173,10 +209,52 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
         if (d.confidence > prev.bestConfidence) prev.bestConfidence = d.confidence;
       }
     }
-    const arr = Array.from(m.values());
-    arr.sort((a, b) => b.bestConfidence - a.bestConfidence);
-    return arr;
+
+    setStickySigns(prev => {
+      const byLabel = new Map<string, StickySign>();
+      for (const s of prev) byLabel.set(s.label, s);
+
+      for (const v of frame.values()) {
+        const existing = byLabel.get(v.label);
+        if (existing) {
+          existing.lastSeenMs = now;
+          existing.bestConfidence = Math.max(existing.bestConfidence, v.bestConfidence);
+          existing.count = v.count;
+          existing.classId = v.classId;
+        } else {
+          byLabel.set(v.label, {
+            label: v.label,
+            classId: v.classId,
+            bestConfidence: v.bestConfidence,
+            count: v.count,
+            lastSeenMs: now,
+          });
+        }
+      }
+
+      const out = Array.from(byLabel.values()).filter(
+        s => now - s.lastSeenMs <= SIGN_DEBOUNCE_MS
+      );
+      out.sort((a, b) => b.lastSeenMs - a.lastSeenMs);
+      return out;
+    });
   }, [detections]);
+
+  // Таймер нужен, чтобы знак исчез ровно через 3с даже если новых детекций нет.
+  useEffect(() => {
+    if (stickySigns.length === 0) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      setStickySigns(prev => {
+        const out = prev.filter(s => now - s.lastSeenMs <= SIGN_DEBOUNCE_MS);
+        if (out.length === prev.length) return prev;
+        return out;
+      });
+    }, 200);
+    return () => clearInterval(id);
+  }, [stickySigns.length]);
+
+  const signs = stickySigns;
 
   return (
     <View style={styles.root}>
@@ -189,16 +267,36 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
         >
           <View style={styles.signsHeader}>
             <Text style={styles.signsTitle}>Знаки</Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.smallButton,
-                pressed && styles.buttonPressed,
-                isDebug && styles.smallButtonActive,
-              ]}
-              onPress={() => setIsDebug(v => !v)}
-            >
-              <Text style={styles.smallButtonText}>Debug</Text>
-            </Pressable>
+
+            <View style={styles.signsHeaderButtonsRow}>
+              <View style={styles.modelButtonWrap}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.smallButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={() => setIsModelPickerOpen(true)}
+                >
+                  <Text style={styles.smallButtonText}>Модель</Text>
+                </Pressable>
+                <Text style={styles.modelButtonSubText} numberOfLines={2}>
+                  {activeModelItem?.title ?? '—'}
+                </Text>
+              </View>
+
+              {isDevBuild && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.smallButton,
+                    pressed && styles.buttonPressed,
+                    isDebug && styles.smallButtonActive,
+                  ]}
+                  onPress={() => setIsDebug(v => !v)}
+                >
+                  <Text style={styles.smallButtonText}>Debug</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
 
           <ScrollView
@@ -249,7 +347,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                   resizeMode="contain"
                 />
 
-                {isDebug && (
+                {(isDevBuild || isDebug) && (
                   <DetectionOverlay
                     detections={detections}
                     frameSize={frameSize}
@@ -358,6 +456,143 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
           )}
         </View>
       </View>
+
+      {isModelPickerOpen && (
+        <View style={[styles.modalRoot, modelPickerSafePadding]} pointerEvents="box-none">
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setIsModelPickerOpen(false)}
+          />
+
+          <View style={styles.modalCard}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={true}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Выбор модели</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.smallButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={() => refreshManifest()}
+                >
+                  <Text style={styles.smallButtonText}>Обновить</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.modalSubText} numberOfLines={2}>
+                {manifestGeneratedAt
+                  ? `manifest generatedAt: ${manifestGeneratedAt}`
+                  : 'manifest: (ещё не загружен)'}
+              </Text>
+              {(catalogState === 'error' || catalogErrorMessage) && (
+                <Text style={[styles.modalSubText, styles.modalErrorText]}>
+                  {catalogErrorMessage ?? 'Ошибка загрузки манифеста'}
+                </Text>
+              )}
+
+              <View style={styles.modalList}>
+                {models.map(m => {
+                  const isDownloading = downloadProgressById[m.id] != null;
+                  const progress = downloadProgressById[m.id] ?? 0;
+                  const canDelete = !m.isBundled && m.isDownloaded && !m.isActive;
+
+                  return (
+                    <View key={m.id} style={styles.modelRow}>
+                      <View style={styles.modelRowMeta}>
+                        <Text style={styles.modelRowTitle} numberOfLines={1}>
+                          {m.title}
+                        </Text>
+                        <Text style={styles.modelRowSub} numberOfLines={2}>
+                          {m.isBundled
+                            ? 'bundled'
+                            : m.isDownloaded
+                              ? `скачана · imgsz=${m.inputSize}`
+                              : `не скачана · imgsz=${m.inputSize}`}
+                          {m.isActive ? ' · active' : ''}
+                        </Text>
+                        {isDownloading && (
+                          <Text style={styles.modelRowSub}>
+                            download: {(progress * 100).toFixed(0)}%
+                          </Text>
+                        )}
+                      </View>
+
+                      <View style={styles.modelRowActions}>
+                        {!m.isBundled && !m.isDownloaded ? (
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.modelActionButton,
+                              pressed && styles.buttonPressed,
+                            ]}
+                            onPress={async () => {
+                              try {
+                                await ensureDownloaded(m.id);
+                              } catch {
+                                // Ошибка уже будет показана через Alert внутри хука/или здесь.
+                              }
+                            }}
+                            disabled={isDownloading}
+                          >
+                            <Text style={styles.modelActionText}>
+                              {isDownloading ? '...' : 'Скачать'}
+                            </Text>
+                          </Pressable>
+                        ) : (
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.modelActionButton,
+                              pressed && styles.buttonPressed,
+                              m.isActive && styles.modelActionButtonActive,
+                            ]}
+                            onPress={async () => {
+                              if (!m.isBundled && !m.isDownloaded) return;
+                              await setActiveModel(m.id);
+                            }}
+                            disabled={m.isActive || (!m.isBundled && !m.isDownloaded)}
+                          >
+                            <Text style={styles.modelActionText}>
+                              {m.isActive ? 'Выбрана' : 'Выбрать'}
+                            </Text>
+                          </Pressable>
+                        )}
+
+                        {canDelete && (
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.modelActionButton,
+                              styles.modelActionButtonDanger,
+                              pressed && styles.buttonPressed,
+                            ]}
+                            onPress={async () => {
+                              await deleteDownloaded(m.id);
+                            }}
+                          >
+                            <Text style={styles.modelActionText}>Удалить</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.button,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={() => setIsModelPickerOpen(false)}
+              >
+                <Text style={styles.buttonText}>Закрыть</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -379,7 +614,19 @@ function SignSvg(props: { label: string; confidence: number }) {
 
   const Sign = signByLabel[props.label];
   if (Sign) {
-    return <Sign width={54} height={54} />;
+    // Большинство наших SVG из датасета идут без viewBox (только width/height=100x86).
+    // Если просто поставить width/height=54, картинка будет клипаться/выходить за границы.
+    // Поэтому задаём viewBox и вписываем в квадрат 54x54 с обрезкой по контейнеру.
+    return (
+      <View style={styles.signIconBox}>
+        <Sign
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 86"
+          preserveAspectRatio="xMidYMid meet"
+        />
+      </View>
+    );
   }
 
   return (
@@ -448,15 +695,27 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   signsHeader: {
+    flexDirection: 'column',
+    paddingBottom: 10,
+  },
+  signsHeaderButtonsRow: {
+    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 10,
+    gap: 10,
   },
   signsTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '900',
+  },
+  modelButtonWrap: { flex: 1, minWidth: 0 },
+  modelButtonSubText: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 11,
+    fontWeight: '800',
   },
   signsList: {
     flex: 1,
@@ -486,6 +745,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
     marginBottom: 10,
+  },
+  signIconBox: {
+    width: 54,
+    height: 54,
+    overflow: 'hidden',
   },
   signMeta: {
     flex: 1,
@@ -568,6 +832,115 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(37, 99, 235, 0.6)',
   },
   smallButtonText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  modalRoot: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: 'rgba(15, 15, 18, 0.98)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
+    padding: 12,
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '85%',
+  },
+  modalScroll: {
+    flexGrow: 0,
+  },
+  modalScrollContent: {
+    paddingBottom: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 10,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  modalSubText: {
+    color: 'rgba(255,255,255,0.70)',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  modalErrorText: {
+    color: 'rgba(255, 120, 120, 0.95)',
+  },
+  modalList: {
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  modelRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    marginBottom: 10,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modelRowMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  modelRowTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  modelRowSub: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.70)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modelRowActions: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  modelActionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  modelActionButtonActive: {
+    backgroundColor: 'rgba(37, 99, 235, 0.35)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(37, 99, 235, 0.6)',
+  },
+  modelActionButtonDanger: {
+    backgroundColor: 'rgba(220, 38, 38, 0.22)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(220, 38, 38, 0.45)',
+  },
+  modelActionText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   metrics: {
     marginTop: 10,
     flexDirection: 'row',

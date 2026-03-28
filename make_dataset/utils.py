@@ -576,6 +576,19 @@ def bbox_iou(b1, b2):
     return inter / float(denom)
 
 
+def bbox_intersection_area(b1, b2):
+    """Площадь пересечения bbox (x1,y1,x2,y2) в пикселях (с +1 как в bbox_iou)."""
+    x11, y11, x12, y12 = b1
+    x21, y21, x22, y22 = b2
+    ix1 = max(x11, x21)
+    iy1 = max(y11, y21)
+    ix2 = min(x12, x22)
+    iy2 = min(y12, y22)
+    iw = max(0, ix2 - ix1 + 1)
+    ih = max(0, iy2 - iy1 + 1)
+    return iw * ih
+
+
 def bbox_from_sign_alpha_at_pos(sign_alpha, top, left, bg_h, bg_w):
     bb = effects.alpha_bbox(sign_alpha, thr=cfg.ALPHA_THRESHOLD)
     if bb is None:
@@ -664,6 +677,17 @@ def place_one_object(bg, state, template_cache, existing_bboxes, max_tries=cfg.M
             if bbox_iou(bb_fast, bb2) > cfg.MAX_IOU_BETWEEN_SIGNS:
                 ok = False
                 break
+
+            # Запрещаем сильное перекрытие меньшего объекта (боремся с “большой накрыл маленький”)
+            inter = bbox_intersection_area(bb_fast, bb2)
+            if inter > 0:
+                a1 = max(0, bb_fast[2] - bb_fast[0] + 1) * max(0, bb_fast[3] - bb_fast[1] + 1)
+                a2 = max(0, bb2[2] - bb2[0] + 1) * max(0, bb2[3] - bb2[1] + 1)
+                denom = float(max(1, min(a1, a2)))
+                io_min = float(inter) / denom
+                if io_min > float(getattr(cfg, "MAX_IO_MINAREA_BETWEEN_SIGNS", 0.25)):
+                    ok = False
+                    break
         if not ok:
             continue
 

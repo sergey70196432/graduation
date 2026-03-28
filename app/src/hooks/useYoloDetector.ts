@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Share } from 'react-native';
-import { loadTensorflowModel, type TensorflowModel } from 'react-native-fast-tflite';
 import {
   useFrameProcessor,
   type Frame,
@@ -8,13 +7,9 @@ import {
 import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { useRunOnJS, useSharedValue } from 'react-native-worklets-core';
 import * as RNFS from 'react-native-fs';
-import { YOLO } from '../constants/yolo';
 import type { Detection, DetectorStats, FrameSize } from '../types/detection';
-import { loadLabelsFromAsset } from '../utils/labels';
 import { decodeYoloV8Detections, type LetterboxMeta } from '../utils/yoloPostprocess';
-
-const MODEL_ASSET = require('../../assets/models/model_float16.tflite');
-const LABELS_ASSET = require('../../assets/models/labels.txt');
+import { useYoloModel } from './useYoloModel';
 
 function readBuildFlag(name: string): boolean {
   // RN/Expo: env может быть “вшит” на этапе сборки, либо отсутствовать в рантайме.
@@ -60,18 +55,30 @@ type UiPayload = {
 };
 
 export function useYoloDetector() {
-  const [labels, setLabels] = useState<string[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [lastFrameSize, setLastFrameSize] = useState<FrameSize | null>(null);
 
-  const [model, setModel] = useState<TensorflowModel | undefined>(undefined);
-  const [modelState, setModelState] = useState<'loading' | 'loaded' | 'error'>(
-    'loading'
-  );
-  const [modelErrorMessage, setModelErrorMessage] = useState<string | null>(
-    null
-  );
+  const {
+    model,
+    labels,
+    isModelLoaded,
+    modelState,
+    modelErrorMessage,
+    activeYoloParams,
+    activeModelItem,
+    models,
+    catalogState,
+    catalogErrorMessage,
+    refreshManifest,
+    setActiveModel,
+    ensureDownloaded,
+    deleteDownloaded,
+    downloadProgressById,
+    manifestGeneratedAt,
+    manifestUrl,
+    storageRoot,
+  } = useYoloModel();
 
   const [stats, setStats] = useState<DetectorStats>({
     fps: 0,
@@ -79,10 +86,12 @@ export function useYoloDetector() {
     lastTotalMs: 0,
     lastNumDetections: 0,
     lastUpdatedAtMs: 0,
-    inputSize: YOLO.inputSize,
+    inputSize: activeYoloParams.inputSize,
   });
 
-  const isModelLoaded = modelState === 'loaded' && model != null;
+  useEffect(() => {
+    setStats(s => ({ ...s, inputSize: activeYoloParams.inputSize }));
+  }, [activeYoloParams.inputSize]);
 
   const { resize } = useResizePlugin();
 
@@ -97,19 +106,6 @@ export function useYoloDetector() {
     frames: 0,
     fps: 0,
   });
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const loaded = await loadLabelsFromAsset(LABELS_ASSET);
-      if (cancelled) return;
-      setLabels(loaded);
-      console.log(`[labels] Загружено классов: ${loaded.length}`);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!WRITE_LOGS) {
@@ -130,11 +126,11 @@ export function useYoloDetector() {
       const header = [
         `# YOLO camera perf log`,
         `# startedAt=${startedAtIso}`,
-        `# inputSize=${YOLO.inputSize}`,
-        `# confidenceThreshold=${YOLO.confidenceThreshold}`,
-        `# iouThreshold=${YOLO.iouThreshold}`,
-        `# preNmsTopK=${YOLO.preNmsTopK}`,
-        `# postNmsTopK=${YOLO.postNmsTopK}`,
+        `# inputSize=${activeYoloParams.inputSize}`,
+        `# confidenceThreshold=${activeYoloParams.confidenceThreshold}`,
+        `# iouThreshold=${activeYoloParams.iouThreshold}`,
+        `# preNmsTopK=${activeYoloParams.preNmsTopK}`,
+        `# postNmsTopK=${activeYoloParams.postNmsTopK}`,
         `# platform=${Platform.OS}`,
         `#`,
         `t_ms\tframe_w\tframe_h\tresized_w\tresized_h\tpad_x\tpad_y\tscale\tresize_ms\tletterbox_ms\tinference_ms\tdecode_ms\ttotal_ms\tdropped\tobjects`,
@@ -182,42 +178,7 @@ export function useYoloDetector() {
         // ignore
       });
     }
-  }, [isDetecting]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setModelState('loading');
-        setModelErrorMessage(null);
-        const m = await loadTensorflowModel(MODEL_ASSET);
-        if (cancelled) return;
-
-        setModel(m);
-        setModelState('loaded');
-
-        // Логи формы тензоров. Это нужно, чтобы при необходимости подправить парсер output.
-        try {
-          console.log('[tflite] delegate:', m.delegate);
-          console.log('[tflite] inputs:', m.inputs);
-          console.log('[tflite] outputs:', m.outputs);
-        } catch (e) {
-          console.warn('[tflite] Не удалось залогировать inputs/outputs', e);
-        }
-      } catch (e) {
-        const msg = String(e);
-        console.warn('[tflite] Ошибка загрузки модели', e);
-        if (cancelled) return;
-        setModel(undefined);
-        setModelState('error');
-        setModelErrorMessage(msg);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [activeYoloParams, isDetecting]);
 
   const onWorkletResult = useRunOnJS((payload: UiPayload) => {
     const now = payload.updatedAtMs;
@@ -269,9 +230,9 @@ export function useYoloDetector() {
       lastTotalMs: payload.perf.totalMs,
       lastNumDetections: payload.detections.length,
       lastUpdatedAtMs: payload.updatedAtMs,
-      inputSize: YOLO.inputSize,
+      inputSize: activeYoloParams.inputSize,
     });
-  }, []);
+  }, [activeYoloParams.inputSize]);
 
   const onWorkletError = useRunOnJS((message: string) => {
     console.warn(message);
@@ -287,7 +248,7 @@ export function useYoloDetector() {
     return Array.isArray(s) ? s : undefined;
   }, [model]);
 
-  const workletMinIntervalMs = Platform.OS === 'android' ? 800 : 80;
+  const workletMinIntervalMs = Platform.OS === 'android' ? 800 : 300;
 
   const frameProcessor = useFrameProcessor(
     (frame: Frame) => {
@@ -319,7 +280,7 @@ export function useYoloDetector() {
         const frameW = frame.width;
         const frameH = frame.height;
 
-        const inputSize = YOLO.inputSize;
+        const inputSize = activeYoloParams.inputSize;
         const scale = Math.min(inputSize / frameW, inputSize / frameH);
         const resizedWidth = Math.max(1, Math.round(frameW * scale));
         const resizedHeight = Math.max(1, Math.round(frameH * scale));
@@ -405,10 +366,10 @@ export function useYoloDetector() {
           labels,
           { width: frameW, height: frameH },
           letterbox,
-          YOLO.confidenceThreshold,
-          YOLO.iouThreshold,
-          YOLO.preNmsTopK,
-          YOLO.postNmsTopK
+          activeYoloParams.confidenceThreshold,
+          activeYoloParams.iouThreshold,
+          activeYoloParams.preNmsTopK,
+          activeYoloParams.postNmsTopK
         );
         const decodeMs = Date.now() - tDecode0;
         const totalMs = Date.now() - tStart;
@@ -470,6 +431,7 @@ export function useYoloDetector() {
       droppedFrames,
       lastErrorAtMs,
       onWorkletError,
+      activeYoloParams,
     ]
   );
 
@@ -485,6 +447,21 @@ export function useYoloDetector() {
     labels,
     lastFrameSize,
     lastLogFilePath,
+
+    // models ui/actions
+    activeModelItem,
+    activeYoloParams,
+    models,
+    catalogState,
+    catalogErrorMessage,
+    refreshManifest,
+    setActiveModel,
+    ensureDownloaded,
+    deleteDownloaded,
+    downloadProgressById,
+    manifestGeneratedAt,
+    manifestUrl,
+    storageRoot,
   };
 }
 

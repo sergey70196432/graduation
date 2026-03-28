@@ -26,12 +26,84 @@
 
 ## Куда положить модель и labels
 
-Пути фиксированные, чтобы было просто заменить файлы:
+### Встроенная (bundled) модель
 
-- `app/assets/models/best.tflite`
+В приложении есть **fallback** модель, которая лежит в ассетах (чтобы всё работало даже без интернета):
+
+- `app/assets/models/model_float16.tflite`
 - `app/assets/models/labels.txt`
 
 `labels.txt` — по одному классу в строке.
+
+### Модели по сети (манифест + S3/Object Storage)
+
+Приложение умеет скачивать модели по интернету и хранить их в **DocumentDirectory** (персистентно).
+
+- **Где задаётся URL манифеста**: `src/constants/models.ts` → `MODELS.manifestUrl`
+- **Где хранятся скачанные модели на устройстве**: `DocumentDirectory/yolo-models/`
+  - `DocumentDirectory/yolo-models/manifest-cache.json` — кеш последнего манифеста
+  - `DocumentDirectory/yolo-models/state.json` — выбранная модель
+  - `DocumentDirectory/yolo-models/<modelId>/model.tflite`
+  - `DocumentDirectory/yolo-models/<modelId>/labels.txt`
+
+Манифест скачивается **по нажатию кнопки “Обновить”** в попапе выбора модели (кнопка “Модель” в колонке “Знаки”).
+
+Важно: URL манифеста должен быть **стабильным** (например публичный объект или ваш backend-эндпоинт).
+Если делать `manifestUrl` тоже pre-signed, он будет истекать, и приложение не сможет обновлять список моделей без обновления самой сборки.
+
+#### Формат манифеста (JSON, UTF‑8)
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-03-28T12:00:00.000Z",
+  "models": [
+    {
+      "id": "yolo-signs-v1",
+      "title": "YOLO Signs v1",
+      "description": "Модель под мои дорожные знаки",
+      "inputSize": 320,
+
+      "confidenceThreshold": 0.25,
+      "iouThreshold": 0.45,
+      "preNmsTopK": 200,
+      "postNmsTopK": 50,
+
+      "model": {
+        "url": "https://<presigned-url-to-model.tflite>",
+        "bytes": 12345678,
+        "sha256": "optional-hex-sha256"
+      },
+      "labels": {
+        "url": "https://<presigned-url-to-labels.txt>",
+        "bytes": 1234,
+        "sha256": "optional-hex-sha256"
+      }
+    }
+  ]
+}
+```
+
+- `url`: **pre-signed** URL (или публичный URL) напрямую до файла
+- `bytes`: рекомендуется указывать, приложение проверяет размер после скачивания
+- `sha256`: опционально (сейчас не проверяется, но полезно хранить для контроля целостности/версий)
+
+#### Как хранить файлы в Object Storage (Yandex Cloud)
+
+Можно хранить как угодно, главное — чтобы в манифесте были прямые ссылки (pre-signed) на конкретные файлы.
+Один из простых вариантов структуры:
+
+- `models/manifest.json`
+- `models/yolo-signs-v1/model.tflite`
+- `models/yolo-signs-v1/labels.txt`
+- `models/yolo-signs-v2/model.tflite`
+- `models/yolo-signs-v2/labels.txt`
+
+На стороне бэкенда/скрипта генерации манифеста ты:
+
+- кладёшь файлы в бакет
+- генерируешь pre-signed URL для `manifest.json`, `model.tflite`, `labels.txt`
+- записываешь эти URL в манифест
 
 ## Экспорт модели из Ultralytics
 

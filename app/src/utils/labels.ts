@@ -1,4 +1,5 @@
 import { Image } from 'react-native';
+import * as RNFS from 'react-native-fs';
 
 export async function loadLabelsFromAsset(
   assetModuleId: number
@@ -21,6 +22,20 @@ export async function loadLabelsFromAsset(
     return lines;
   } catch (e) {
     console.warn('[labels] Ошибка чтения labels.txt', e);
+    return [];
+  }
+}
+
+export async function loadLabelsFromFile(filePath: string): Promise<string[]> {
+  try {
+    const text = await RNFS.readFile(filePath, 'utf8');
+    const lines = text
+      .split(/\r?\n/g)
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+    return lines;
+  } catch (e) {
+    console.warn('[labels] Ошибка чтения labels.txt из файла', e);
     return [];
   }
 }
