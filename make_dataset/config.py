@@ -33,7 +33,7 @@ SELECT_CLASS_IDS = []  # пример: [0, 4, 10]
 
 # ===================== Внешний датасет (YOLO) =====================
 EXTERNAL_MIX_ENABLED = True
-EXTERNAL_DATASET_DIR = "make_dataset/external_dataset/*"
+EXTERNAL_DATASET_DIR = "make_dataset\\external_dataset\\Road Sign.v6"
 EXTERNAL_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # ===================== Геометрия / аугментации =====================
