@@ -31,11 +31,13 @@ from make_dataset.utils import (
     fmt_progress,
     generate_multi,
     import_external_images_for_selected,
+    import_negative_images,
     info,
     load_background_paths,
     load_bg_bgr,
     load_classes,
     load_external_index,
+    load_negative_image_paths,
     normalize_class_code,
     reserve_object_specs,
     save_negative_sample,
@@ -107,6 +109,7 @@ def generate_dataset():
 
     imported_counts = {}
     generated_counts = {}
+    pos_images_count = 0
 
     state_by_id = {}
     for c in all_classes:
@@ -127,7 +130,7 @@ def generate_dataset():
 
     if external_index.get("enabled"):
         unique_idx_ref = [unique_idx]
-        imported_counts, _imported_ids = import_external_images_for_selected(
+        imported_counts, _imported_ids, imported_images = import_external_images_for_selected(
             out_dir=out_dir,
             external_index=external_index,
             selected_ids=selected_ids,
@@ -140,6 +143,7 @@ def generate_dataset():
             val_f=val_f,
         )
         unique_idx = unique_idx_ref[0]
+        pos_images_count += int(imported_images)
         for cid, cnt in imported_counts.items():
             if cid in state_by_id:
                 state_by_id[cid]["count"] += int(cnt)
@@ -203,6 +207,7 @@ def generate_dataset():
                             continue
 
                         rel_img_path, labels = res
+                        pos_images_count += 1
                         if random.random() < cfg.VAL_RATIO:
                             if val_list is not None:
                                 val_list.append(rel_img_path)
@@ -246,6 +251,7 @@ def generate_dataset():
 
                 unique_idx += 1
                 rel_img_path = save_sample(out_dir, img_bgr, unique_idx, labels, id_to_code)
+                pos_images_count += 1
 
                 if random.random() < cfg.VAL_RATIO:
                     if val_list is not None:
@@ -274,36 +280,44 @@ def generate_dataset():
     finally:
         ann_f.close()
 
-    exp_objs = 1.0 + (cfg.EXTRA_OBJECTS_RANGE[0] + cfg.EXTRA_OBJECTS_RANGE[1]) / 2.0 if cfg.MULTI_OBJECT_ENABLED else 1.0
-    exp_images = (len(selected_classes) * target_instances) / max(1.0, exp_objs)
-    neg_count = int(round(exp_images * float(cfg.NEGATIVE_RATIO)))
-    if neg_count > 0:
-        info(f"Генерируем негативные изображения: {neg_count}")
-        for _ in range(neg_count):
-            bg = load_bg_bgr(random.choice(bg_paths))
-            bg = effects.apply_weather(bg)
-            bg = effects.apply_camera_effects(bg)
-            unique_idx += 1
-            rel_img_path = save_negative_sample(out_dir, bg, unique_idx)
-            if random.random() < cfg.VAL_RATIO:
-                if val_list is not None:
-                    val_list.append(rel_img_path)
-                else:
-                    # train/val уже открыт выше, но на всякий случай пишем безопасно
-                    if val_f is not None:
-                        val_f.write(rel_img_path + "\n")
-                    else:
-                        with open(os.path.join(out_dir, "val.txt"), "a", encoding="utf-8") as f:
-                            f.write(rel_img_path + "\n")
+    # Негативные изображения: не генерируем, а подмешиваем из make_dataset/negative
+    neg_added = 0
+    neg_needed = 0
+    if bool(getattr(cfg, "NEGATIVE_ENABLED", False)) and float(getattr(cfg, "NEGATIVE_RATIO", 0.0)) > 0.0:
+        r = float(getattr(cfg, "NEGATIVE_RATIO", 0.0))
+        if r >= 1.0:
+            warn("NEGATIVE_RATIO >= 1.0 — невозможно при наличии позитивных. Возьмём все доступные негативы.")
+            neg_needed = 10**9
+        elif pos_images_count <= 0:
+            warn("Позитивных изображений нет, NEGATIVE_RATIO не может быть достигнут.")
+            neg_needed = 0
+        else:
+            neg_needed = int(round((r / (1.0 - r)) * float(pos_images_count)))
+
+        available = load_negative_image_paths()
+        if not available:
+            warn(f"NEGATIVE_ENABLED=True, но в папке негативов нет изображений: {cfg.NEGATIVE_IMAGES_DIR}")
+        else:
+            if neg_needed >= 10**9:
+                chosen = list(available)
+            elif len(available) < neg_needed:
+                warn(f"Негативов меньше, чем нужно по NEGATIVE_RATIO: есть {len(available)}, нужно {neg_needed}.")
+                chosen = list(available)
             else:
-                if train_list is not None:
-                    train_list.append(rel_img_path)
-                else:
-                    if train_f is not None:
-                        train_f.write(rel_img_path + "\n")
-                    else:
-                        with open(os.path.join(out_dir, "train.txt"), "a", encoding="utf-8") as f:
-                            f.write(rel_img_path + "\n")
+                chosen = random.sample(list(available), k=int(neg_needed))
+
+            unique_idx_ref = [unique_idx]
+            neg_added = import_negative_images(
+                out_dir=out_dir,
+                negative_paths=chosen,
+                unique_idx_ref=unique_idx_ref,
+                train_list=train_list,
+                val_list=val_list,
+                train_f=train_f,
+                val_f=val_f,
+            )
+            unique_idx = unique_idx_ref[0]
+            info(f"Подмешано негативных изображений: {neg_added} (нужно {neg_needed}, доступно {len(available)})")
 
     write_dataset_yaml_and_splits(out_dir, all_classes, train_list, val_list)
     if train_f is not None:

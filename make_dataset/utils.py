@@ -1115,6 +1115,7 @@ def import_external_images_for_selected(
 ):
     imported_counts = {}
     imported_class_ids = set()
+    imported_images = 0
 
     images_to_import = set()
     for cid in selected_ids:
@@ -1123,7 +1124,7 @@ def import_external_images_for_selected(
             images_to_import.update(imgs)
 
     if not images_to_import:
-        return imported_counts, imported_class_ids
+        return imported_counts, imported_class_ids, imported_images
 
     info(f"Подмешиваем внешние изображения: {len(images_to_import)} шт.")
 
@@ -1173,7 +1174,71 @@ def import_external_images_for_selected(
             imported_counts[int(cid)] = imported_counts.get(int(cid), 0) + 1
             ann_w.writerow([rel_img_path, cid, f"{xc:.6f}", f"{yc:.6f}", f"{w:.6f}", f"{h:.6f}"])
 
-    return imported_counts, imported_class_ids
+        imported_images += 1
+
+    return imported_counts, imported_class_ids, imported_images
+
+
+def load_negative_image_paths():
+    """Список путей к негативным изображениям (можно рекурсивно)."""
+    return list_files_by_ext_recursive(cfg.NEGATIVE_IMAGES_DIR, cfg.NEGATIVE_IMAGE_EXTS)
+
+
+def import_negative_images(
+    out_dir,
+    negative_paths,
+    unique_idx_ref,
+    train_list=None,
+    val_list=None,
+    train_f=None,
+    val_f=None,
+):
+    """
+    Копируем/конвертируем негативные изображения в датасет:
+    - пишем PNG в images/
+    - создаём пустой label-файл
+    - добавляем в train/val
+    Возвращаем количество реально добавленных негативов.
+    """
+    added = 0
+    for src in negative_paths:
+        img = cv2.imread(src, cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+
+        unique_idx_ref[0] += 1
+        unique_idx = unique_idx_ref[0]
+
+        img_file = f"negative__{unique_idx:07d}.png"
+        out_img_path = os.path.join(out_dir, "images", img_file)
+        out_lbl_path = os.path.join(out_dir, "labels", os.path.splitext(img_file)[0] + ".txt")
+
+        ok = cv2.imwrite(
+            out_img_path,
+            img,
+            [int(cv2.IMWRITE_PNG_COMPRESSION), int(getattr(cfg, "PNG_COMPRESSION", 3))],
+        )
+        if not ok:
+            continue
+
+        with open(out_lbl_path, "w", encoding="utf-8") as f:
+            f.write("")
+
+        rel_img_path = os.path.join("images", img_file)
+        if random.random() < cfg.VAL_RATIO:
+            if val_list is not None:
+                val_list.append(rel_img_path)
+            elif val_f is not None:
+                val_f.write(rel_img_path + "\n")
+        else:
+            if train_list is not None:
+                train_list.append(rel_img_path)
+            elif train_f is not None:
+                train_f.write(rel_img_path + "\n")
+
+        added += 1
+
+    return added
 
 
 def generate_dataset():

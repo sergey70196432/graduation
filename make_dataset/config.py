@@ -49,8 +49,18 @@ RIGHT_HALF_PROB = 0.8              # шанс, что знак окажется 
 MIN_VISIBLE_AREA_FRACTION = 0.60   # минимум видимой площади знака (0..1)
 MAX_PLACEMENT_TRIES = 10           # попыток размещения знака
 
-# Негативные примеры (кадры без знаков)
-NEGATIVE_RATIO = 0
+# ===================== Негативные примеры (кадры без знаков) =====================
+# ВАЖНО: негативы больше НЕ "генерируются" из фонов. Они берутся из папки NEGATIVE_IMAGES_DIR
+# и копируются в dataset_<n>/images с пустыми label-файлами.
+NEGATIVE_ENABLED = True
+
+# Доля негативных изображений в ИТОГОВОМ датасете (0..1):
+# neg / (pos + neg) ~= NEGATIVE_RATIO
+NEGATIVE_RATIO = 0.0
+
+# Папка с готовыми негативными изображениями
+NEGATIVE_IMAGES_DIR = "make_dataset/negative"
+NEGATIVE_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # Несколько знаков на одном изображении
 MULTI_OBJECT_ENABLED = True
