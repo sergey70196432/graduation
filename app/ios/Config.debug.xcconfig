@@ -1,0 +1,12 @@
+//
+//  Config.dev.xcconfig
+//  app
+//
+//  Created by Sergey Elmanov on 30.03.2026.
+//
+
+// Configuration settings file format documentation can be found at:
+// https://help.apple.com/xcode/#/dev745c5c974
+
+WRITE_LOGS = 0
+SHOW_SPEED_ROI = 1
