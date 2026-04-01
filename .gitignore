@@ -23,3 +23,6 @@ models/*
 /app/.tmp
 /app/.tmp-fast-tflite
 
+.mplconfig
+
+runs

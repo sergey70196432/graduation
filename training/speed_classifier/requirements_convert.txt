@@ -1,0 +1,20 @@
+# ВНИМАНИЕ:
+# На macOS + onnx2tf есть несовместимости:
+# - onnx-graphsurgeon ожидает `onnx.helper.float32_to_bfloat16`, которого нет в onnx==1.21.*
+# Поэтому пиним onnx до 1.19.0 (там функция есть).
+# Также лучше держать numpy 1.x (часть тулов для ONNX/TF ещё не всегда дружит с numpy 2.x).
+numpy==1.26.4
+onnx==1.19.0
+
+onnxscript
+onnxruntime
+# Пиним onnx2tf на версию без ai_edge_litert (на macOS она падает на Metal-символах).
+onnx2tf==1.22.0
+sng4onnx
+tensorflow
+tf-keras
+
+onnx-graphsurgeon
+psutil
+onnxsim
+onnxoptimizer
