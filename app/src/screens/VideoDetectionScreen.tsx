@@ -18,7 +18,7 @@ import { DetectionOverlay } from '../components/DetectionOverlay';
 import type { Detection, FrameSize } from '../types/detection';
 import { decodeJpegToRgba } from '../utils/jpegDecode.ts';
 import { buildLetterboxedFloatInput } from '../utils/rgbLetterbox.ts';
-import { decodeYoloV8Detections } from '../utils/yoloPostprocess';
+import { decodeYoloV8DetectionsEmbeddedNms } from '../utils/yoloPostprocess';
 import { useYoloModel } from '../hooks/useYoloModel';
 
 type Thumb = {
@@ -117,20 +117,14 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
     height: 0,
   });
   const [lastInferenceMs, setLastInferenceMs] = useState<number>(0);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [_isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoPositionMs, setVideoPositionMs] = useState(0);
-  const [autoInferEnabled, setAutoInferEnabled] = useState(true);
-  const [autoInferFps, setAutoInferFps] = useState<1 | 2 | 4 | 8>(4);
 
-  const lastAutoInferAtMsRef = useRef(0);
   const processingRef = useRef(false);
-
-  const output0Shape = useMemo(() => {
-    const s = model?.outputs?.[0]?.shape;
-    return Array.isArray(s) ? s : undefined;
-  }, [model]);
+  const loopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastInferredTsMsRef = useRef<number>(-1);
 
   const onPickVideoFromFiles = useCallback(async () => {
     try {
@@ -194,13 +188,11 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
   const inferFrame = useCallback(async (params: {
     labels: string[];
     model: TensorflowModel | undefined;
-    output0Shape: number[] | undefined;
     timestampMs: number;
     videoUri: string | null;
   }) => {
     const labs = params.labels;
     const m = params.model;
-    const outShape = params.output0Shape;
     const tsMs = params.timestampMs;
     const vUri = params.videoUri;
 
@@ -248,16 +240,12 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
       }
 
       const startDecode = Date.now();
-      const decodedDetections = decodeYoloV8Detections(
+      const decodedDetections = decodeYoloV8DetectionsEmbeddedNms(
         out0,
-        outShape,
         labs,
         srcFrameSize,
         letterbox,
-        activeYoloParams.confidenceThreshold,
-        activeYoloParams.iouThreshold,
-        activeYoloParams.preNmsTopK,
-        activeYoloParams.postNmsTopK
+        activeYoloParams.confidenceThreshold
       );
 
       console.log('decode time', Date.now() - startDecode + 'ms');
@@ -277,93 +265,78 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
     }
   }, [activeYoloParams]);
 
-  const onInferCurrentFrame = useCallback(async () => {
-    if (isProcessing) return;
-
-    setIsProcessing(true);
-    setProcessingError(null);
-
-    await inferFrame({
-      labels,
-      model,
-      output0Shape,
-      timestampMs,
-      videoUri,
-    });
-  }, [inferFrame, videoUri, model, labels, isProcessing, timestampMs, output0Shape]);
-
   const onTogglePlay = useCallback(() => {
     setIsPlaying(v => !v);
   }, []);
 
-  const onToggleAutoInfer = useCallback(() => {
-    setAutoInferEnabled(v => !v);
-  }, []);
-
-  const onCycleAutoInferFps = useCallback(() => {
-    setAutoInferFps(v => {
-      if (v === 1) return 2;
-      if (v === 2) return 4;
-      if (v === 4) return 8;
-      return 1;
-    });
-  }, []);
-
-  // Авто-инференс во время воспроизведения: берём текущий таймкод видео и раз в N мс делаем thumbnail+inference.
+  // Непрерывный авто-инференс:
+  // - инференс всегда включён и не отключается
+  // - как только обработка закончилась, берём текущий кадр (по таймкоду) и запускаем следующий прогон
+  // - защита: если таймкод не меняется (например, видео на паузе) — не крутимся в tight-loop
   useEffect(() => {
-    if (!autoInferEnabled) return;
+    // стартуем только когда всё готово
+    if (!videoUri) return;
+    if (!model) return;
+    if (labels.length === 0) return;
 
-    const minIntervalMs = Math.max(100, Math.round(1000 / autoInferFps));
-    const id = setInterval(() => {
-      const now = Date.now();
-      if (processingRef.current) return;
-      if (now - lastAutoInferAtMsRef.current < minIntervalMs) return;
+    let cancelled = false;
 
-      lastAutoInferAtMsRef.current = now;
+    const schedule = (ms: number) => {
+      if (loopTimeoutRef.current) clearTimeout(loopTimeoutRef.current);
+      loopTimeoutRef.current = setTimeout(tick, ms);
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (processingRef.current) {
+        schedule(30);
+        return;
+      }
+
+      const ts = Math.max(0, Math.round(isPlaying ? videoPositionMs : timestampMs));
+      const lastTs = lastInferredTsMsRef.current;
+
+      // Если кадр "не сдвинулся", не делаем бесконечный прогон одного и того же.
+      if (ts === lastTs) {
+        schedule(isPlaying ? 30 : 200);
+        return;
+      }
+
+      lastInferredTsMsRef.current = ts;
       processingRef.current = true;
-
-      // запускаем инференс на текущем таймкоде, но не трогаем UI таймкод вручную
-      const ts = Math.max(
-        0,
-        Math.round(isPlaying ? videoPositionMs : timestampMs)
-      );
-
-      inferFrame({
-        labels,
-        model,
-        output0Shape,
-        timestampMs: ts,
-        videoUri,
-      }).catch(() => {
+      setIsProcessing(true);
+      setProcessingError(null);
+      try {
+        await inferFrame({
+          labels,
+          model,
+          timestampMs: ts,
+          videoUri,
+        });
+      } catch (e) {
+        setProcessingError(humanizeVideoOpenError(e));
+      } finally {
         processingRef.current = false;
-      });
-    }, 80);
+        setIsProcessing(false);
+        schedule(0);
+      }
+    };
 
-    return () => clearInterval(id);
+    schedule(0);
+    return () => {
+      cancelled = true;
+      if (loopTimeoutRef.current) clearTimeout(loopTimeoutRef.current);
+      loopTimeoutRef.current = null;
+    };
   }, [
     inferFrame,
-    autoInferEnabled,
-    autoInferFps,
     isPlaying,
     labels,
     model,
-    output0Shape,
     timestampMs,
     videoPositionMs,
     videoUri,
   ]);
-
-  // Сразу после выбора видео делаем один auto-infer на 0ms (если включено).
-  useEffect(() => {
-    if (!autoInferEnabled) return;
-    if (!videoUri) return;
-    if (!model) return;
-    if (labels.length === 0) return;
-    setTimestampMs(0);
-    // делаем одиночный прогон
-    onInferCurrentFrame();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoInferEnabled, labels.length, model, videoUri]);
 
   const onPrev = useCallback(() => {
     setTimestampMs(t => Math.max(0, t - 500));
@@ -371,8 +344,6 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
   const onNext = useCallback(() => {
     setTimestampMs(t => t + 500);
   }, []);
-
-  const canInfer = !isLoadingModel && model != null && labels.length > 0 && videoUri != null;
 
   console.log('Render');
   console.log('isPlaying', isPlaying);
@@ -488,47 +459,12 @@ export function VideoDetectionScreen(props: { onBack?: () => void }) {
           <View style={[styles.row, styles.rowMt10]}>
             <Pressable
               style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-              onPress={onToggleAutoInfer}
-              disabled={!videoUri || !model || labels.length === 0}
-            >
-              <Text style={styles.buttonText}>
-                Auto infer: {autoInferEnabled ? 'ON' : 'OFF'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-              onPress={onCycleAutoInferFps}
-              disabled={!autoInferEnabled}
-            >
-              <Text style={styles.buttonText}>FPS: {autoInferFps}</Text>
-            </Pressable>
-          </View>
-
-          <View style={[styles.row, styles.rowMt10]}>
-            <Pressable
-              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
               onPress={onPickVideoFromFiles}
             >
               <Text style={styles.buttonText}>Pick (Files)</Text>
             </Pressable>
           </View>
 
-          <View style={[styles.row, styles.rowMt10]}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.button,
-                pressed && styles.buttonPressed,
-                !canInfer && styles.buttonDisabled,
-              ]}
-              onPress={onInferCurrentFrame}
-              disabled={!canInfer}
-            >
-              <Text style={styles.buttonText}>
-                {isProcessing ? 'Processing…' : 'Infer frame'}
-              </Text>
-            </Pressable>
-          </View>
 
           <View style={[styles.row, styles.rowMt10]}>
             <Pressable

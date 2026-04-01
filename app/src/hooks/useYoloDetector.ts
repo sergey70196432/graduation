@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Share } from 'react-native';
 import {
   useFrameProcessor,
@@ -8,15 +8,80 @@ import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { useRunOnJS, useSharedValue } from 'react-native-worklets-core';
 import * as RNFS from 'react-native-fs';
 import type { Detection, DetectorStats, FrameSize } from '../types/detection';
-import { decodeYoloV8Detections, type LetterboxMeta } from '../utils/yoloPostprocess';
+import {
+  decodeYoloV8DetectionsEmbeddedNms,
+  type LetterboxMeta,
+} from '../utils/yoloPostprocess';
 import { useYoloModel } from './useYoloModel';
+import { useSpeedClassifierModel } from './useSpeedClassifierModel';
+import Config from 'react-native-config';
+
+const SPEED_CLS_INPUT_SIZE = 128;
+const SPEED_CLS_MIN_ROI_PX = 10;
+const SPEED_CLS_MARGIN = 0.05;
+const SPEED_CLS_MIN_CONF = 0.01;
+
+// ВАЖНО: на обучении используется torchvision Normalize(ImageNet):
+// x = (x/255 - mean) / std
+const SPEED_CLS_MEAN_R = 0.485;
+const SPEED_CLS_MEAN_G = 0.456;
+const SPEED_CLS_MEAN_B = 0.406;
+const SPEED_CLS_STD_R = 0.229;
+const SPEED_CLS_STD_G = 0.224;
+const SPEED_CLS_STD_B = 0.225;
+
+function clamp(v: number, lo: number, hi: number): number {
+  'worklet';
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function isBaseInList(base: string, bases: readonly string[]): boolean {
+  'worklet';
+  for (let i = 0; i < bases.length; i++) {
+    if (bases[i] === base) return true;
+  }
+  return false;
+}
+
+function argmax(a: Float32Array): number {
+  'worklet';
+  let bestI = 0;
+  let bestV = a[0] ?? -1e9;
+  for (let i = 1; i < a.length; i++) {
+    const v = a[i] ?? -1e9;
+    if (v > bestV) {
+      bestV = v;
+      bestI = i;
+    }
+  }
+  return bestI;
+}
+
+function softmaxProbAt(a: Float32Array, idx: number): number {
+  'worklet';
+  // stable softmax probability for one index
+  let m = -1e9;
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i] ?? -1e9;
+    if (v > m) m = v;
+  }
+  let sum = 0;
+  let num = 0;
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i] ?? -1e9;
+    const e = Math.exp(v - m);
+    sum += e;
+    if (i === idx) num = e;
+  }
+  if (sum <= 0) return 0;
+  return num / sum;
+}
+
+// NOTE: Раньше ROI для speed-cls резали из YOLO input tensor через bilinear.
+// Сейчас ROI берём из оригинального кадра через resize-plugin, поэтому эта функция не нужна.
 
 function readBuildFlag(name: string): boolean {
-  // RN/Expo: env может быть “вшит” на этапе сборки, либо отсутствовать в рантайме.
-  const g = globalThis as unknown as {
-    process?: { env?: Record<string, unknown> };
-  };
-  const env = g.process?.env;
+  const env = Config;
   const raw =
     env?.[name] ??
     env?.[`EXPO_PUBLIC_${name}`] ??
@@ -41,6 +106,8 @@ type FramePerf = {
   letterboxMs: number;
   inferenceMs: number;
   decodeMs: number;
+  speedClsMs: number;
+  speedClsRan: boolean;
   totalMs: number;
   droppedFramesSinceLastReport: number;
   numDetections: number;
@@ -74,16 +141,32 @@ export function useYoloDetector() {
     setActiveModel,
     ensureDownloaded,
     deleteDownloaded,
+    isClearingStorage,
+    clearStorage,
     downloadProgressById,
     manifestGeneratedAt,
     manifestUrl,
     storageRoot,
   } = useYoloModel();
 
+  const {
+    model: speedModel,
+    labels: speedLabels,
+    speedBases,
+    isLoaded: isSpeedModelLoaded,
+    state: speedModelState,
+    errorMessage: speedModelErrorMessage,
+  } = useSpeedClassifierModel();
+
   const [stats, setStats] = useState<DetectorStats>({
     fps: 0,
     lastInferenceMs: 0,
     lastTotalMs: 0,
+    resizeMs: 0,
+    letterboxMs: 0,
+    decodeMs: 0,
+    lastSpeedClsMs: 0,
+    lastSpeedClsRan: false,
     lastNumDetections: 0,
     lastUpdatedAtMs: 0,
     inputSize: activeYoloParams.inputSize,
@@ -133,7 +216,7 @@ export function useYoloDetector() {
         `# postNmsTopK=${activeYoloParams.postNmsTopK}`,
         `# platform=${Platform.OS}`,
         `#`,
-        `t_ms\tframe_w\tframe_h\tresized_w\tresized_h\tpad_x\tpad_y\tscale\tresize_ms\tletterbox_ms\tinference_ms\tdecode_ms\ttotal_ms\tdropped\tobjects`,
+        `t_ms\tframe_w\tframe_h\tresized_w\tresized_h\tpad_x\tpad_y\tscale\tresize_ms\tletterbox_ms\tinference_ms\tdecode_ms\tspeed_cls_ms\tspeed_cls_ran\ttotal_ms\tdropped\tobjects`,
       ];
       logLinesRef.current = header;
       return;
@@ -214,6 +297,8 @@ export function useYoloDetector() {
             p.letterboxMs.toFixed(2),
             p.inferenceMs.toFixed(2),
             p.decodeMs.toFixed(2),
+            p.speedClsMs.toFixed(2),
+            p.speedClsRan ? 1 : 0,
             p.totalMs.toFixed(2),
             p.droppedFramesSinceLastReport,
             p.numDetections,
@@ -228,6 +313,11 @@ export function useYoloDetector() {
       fps: fpsRef.current.fps,
       lastInferenceMs: payload.inferenceMs,
       lastTotalMs: payload.perf.totalMs,
+      resizeMs: payload.perf.resizeMs,
+      letterboxMs: payload.perf.letterboxMs,
+      decodeMs: payload.perf.decodeMs,
+      lastSpeedClsMs: payload.perf.speedClsMs,
+      lastSpeedClsRan: payload.perf.speedClsRan,
       lastNumDetections: payload.detections.length,
       lastUpdatedAtMs: payload.updatedAtMs,
       inputSize: activeYoloParams.inputSize,
@@ -242,11 +332,6 @@ export function useYoloDetector() {
   const lastReportAtMs = useSharedValue(0);
   const droppedFrames = useSharedValue(0);
   const lastErrorAtMs = useSharedValue(0);
-
-  const output0Shape = useMemo(() => {
-    const s = model?.outputs?.[0]?.shape;
-    return Array.isArray(s) ? s : undefined;
-  }, [model]);
 
   const workletMinIntervalMs = Platform.OS === 'android' ? 800 : 300;
 
@@ -279,6 +364,8 @@ export function useYoloDetector() {
         const tStart = now0;
         const frameW = frame.width;
         const frameH = frame.height;
+
+        // ROI debug previews were removed.
 
         const inputSize = activeYoloParams.inputSize;
         const scale = Math.min(inputSize / frameW, inputSize / frameH);
@@ -360,18 +447,193 @@ export function useYoloDetector() {
 
         stage = 'decode';
         const tDecode0 = Date.now();
-        const decoded = decodeYoloV8Detections(
+        const decoded = decodeYoloV8DetectionsEmbeddedNms(
           out0,
-          output0Shape,
           labels,
           { width: frameW, height: frameH },
           letterbox,
-          activeYoloParams.confidenceThreshold,
-          activeYoloParams.iouThreshold,
-          activeYoloParams.preNmsTopK,
-          activeYoloParams.postNmsTopK
+          activeYoloParams.confidenceThreshold
         );
         const decodeMs = Date.now() - tDecode0;
+
+        let speedClsMs = 0;
+        let speedClsRan = false;
+
+        // 4) Optional refinement: speed value classifier
+        // Требования:
+        // 1) прогоняем для всех детекций "скоростных" баз
+        // 2) если уверенность < 50% => удаляем детекцию целиком
+        // 3) ROI берём из оригинального кадра (frame), а не из YOLO input tensor
+        stage = 'speed_cls';
+        const tSpeed0 = Date.now();
+        let decodedOut = decoded;
+        if (
+          speedModel != null &&
+          speedLabels.length > 0 &&
+          speedBases.length > 0 &&
+          decoded.length > 0
+        ) {
+          const filtered: Detection[] = [];
+          const gg2 = globalThis as unknown as {
+            __speedClsInputFloat?: Float32Array;
+          };
+          const dstLen = SPEED_CLS_INPUT_SIZE * SPEED_CLS_INPUT_SIZE * 3;
+          let speedInput = gg2.__speedClsInputFloat;
+          if (!(speedInput instanceof Float32Array) || speedInput.length !== dstLen) {
+            speedInput = new Float32Array(dstLen);
+            gg2.__speedClsInputFloat = speedInput;
+          }
+
+          const inv255Speed = 1 / 255;
+          for (let i = 0; i < decoded.length; i++) {
+            const d = decoded[i];
+            if (!d) continue;
+
+            const raw = String(d.label ?? '');
+            const base = raw.split('_')[0] ?? '';
+            const isSpeedBase = !!base && isBaseInList(base, speedBases);
+            if (!isSpeedBase) {
+              filtered.push(d);
+              continue;
+            }
+
+            // Если знак слишком маленький — не удаляем детекцию (важно для дебага).
+            if (d.bbox.width < SPEED_CLS_MIN_ROI_PX || d.bbox.height < SPEED_CLS_MIN_ROI_PX) {
+              filtered.push(d);
+              continue;
+            }
+
+            // ROI в координатах ОРИГИНАЛЬНОГО кадра (frame), с небольшим margin.
+            let x1 = d.bbox.x;
+            let y1 = d.bbox.y;
+            let x2 = d.bbox.x + d.bbox.width;
+            let y2 = d.bbox.y + d.bbox.height;
+
+            const w0 = Math.max(1, x2 - x1);
+            const h0 = Math.max(1, y2 - y1);
+            x1 = x1 - w0 * SPEED_CLS_MARGIN;
+            y1 = y1 - h0 * SPEED_CLS_MARGIN;
+            x2 = x2 + w0 * SPEED_CLS_MARGIN;
+            y2 = y2 + h0 * SPEED_CLS_MARGIN;
+
+            x1 = clamp(x1, 0, frameW - 1);
+            y1 = clamp(y1, 0, frameH - 1);
+            x2 = clamp(x2, 0, frameW - 1);
+            y2 = clamp(y2, 0, frameH - 1);
+
+            const roiW = Math.max(1, Math.round(x2 - x1));
+            const roiH = Math.max(1, Math.round(y2 - y1));
+            if (roiW < 2 || roiH < 2) {
+              filtered.push(d);
+              continue;
+            }
+
+            try {
+              // Берём кроп из оригинального кадра и сразу ресайзим в вход классификатора.
+              const roiU8 = resize(frame, {
+                crop: {
+                  x: Math.round(x1),
+                  y: Math.round(y1),
+                  width: roiW,
+                  height: roiH,
+                },
+                scale: { width: SPEED_CLS_INPUT_SIZE, height: SPEED_CLS_INPUT_SIZE },
+                pixelFormat: 'rgb',
+                dataType: 'uint8',
+              }) as Uint8Array;
+
+              const invStdR = 1 / SPEED_CLS_STD_R;
+              const invStdG = 1 / SPEED_CLS_STD_G;
+              const invStdB = 1 / SPEED_CLS_STD_B;
+              // roiU8 — HWC, RGB uint8
+              for (let j = 0; j < dstLen; j += 3) {
+                const r = (roiU8[j] ?? 0) * inv255Speed;
+                const g1 = (roiU8[j + 1] ?? 0) * inv255Speed;
+                const b = (roiU8[j + 2] ?? 0) * inv255Speed;
+                speedInput[j] = (r - SPEED_CLS_MEAN_R) * invStdR;
+                speedInput[j + 1] = (g1 - SPEED_CLS_MEAN_G) * invStdG;
+                speedInput[j + 2] = (b - SPEED_CLS_MEAN_B) * invStdB;
+              }
+
+              const out2 = speedModel.runSync([speedInput]);
+              const logits = out2[0];
+              if (logits instanceof Float32Array) {
+                speedClsRan = true;
+                // ВАЖНО: YOLO уже хорошо различает "базу" знака (например 3.24 vs 3.25).
+                // Поэтому ограничиваем выбор класса только этой базой, а speed-cls уточняет именно значение.
+                // Это резко снижает путаницу между базами при похожих цифрах (50, 60, ...).
+                let bestIdx = -1;
+                let bestV = -1e9;
+                for (let k = 0; k < logits.length && k < speedLabels.length; k++) {
+                  const lbl = speedLabels[k];
+                  if (typeof lbl !== 'string') continue;
+                  const b = lbl.split('_')[0] ?? '';
+                  if (b !== base) continue;
+                  const v = logits[k] ?? -1e9;
+                  if (v > bestV) {
+                    bestV = v;
+                    bestIdx = k;
+                  }
+                }
+
+                let idx = bestIdx;
+                if (idx < 0) {
+                  // fallback: если по какой-то причине labels не содержат эту базу
+                  idx = argmax(logits);
+                }
+
+                // Probability считаем по softmax. Если нашли базу — считаем softmax только по классам этой базы.
+                let prob = 0;
+                if (bestIdx >= 0) {
+                  let m = -1e9;
+                  for (let k = 0; k < logits.length && k < speedLabels.length; k++) {
+                    const lbl = speedLabels[k];
+                    if (typeof lbl !== 'string') continue;
+                    const b = lbl.split('_')[0] ?? '';
+                    if (b !== base) continue;
+                    const v = logits[k] ?? -1e9;
+                    if (v > m) m = v;
+                  }
+                  let sum = 0;
+                  let num = 0;
+                  for (let k = 0; k < logits.length && k < speedLabels.length; k++) {
+                    const lbl = speedLabels[k];
+                    if (typeof lbl !== 'string') continue;
+                    const b = lbl.split('_')[0] ?? '';
+                    if (b !== base) continue;
+                    const v = logits[k] ?? -1e9;
+                    const e = Math.exp(v - m);
+                    sum += e;
+                    if (k === bestIdx) num = e;
+                  }
+                  prob = sum > 0 ? num / sum : 0;
+                } else {
+                  prob = softmaxProbAt(logits, idx);
+                }
+
+                if (prob >= SPEED_CLS_MIN_CONF) {
+                  const refined = speedLabels[idx];
+                  if (typeof refined === 'string' && refined.length > 0) {
+                    d.refinedLabel = refined;
+                    d.refinedConfidence = prob;
+                  }
+                }
+              }
+            } catch {
+              // Если ROI-кроп/ресайз на устройстве не поддержан/упал — не ломаем весь пайплайн.
+              // Оставляем исходную детекцию без refined-результата.
+              filtered.push(d);
+              continue;
+            }
+
+            // Если дошли сюда — либо успешно уточнили, либо logits не Float32Array.
+            // В обоих случаях оставляем детекцию (если logits невалидны — без refined).
+            filtered.push(d);
+          }
+          decodedOut = filtered;
+        }
+
+        speedClsMs = Date.now() - tSpeed0;
         const totalMs = Date.now() - tStart;
 
         stage = 'report';
@@ -381,7 +643,7 @@ export function useYoloDetector() {
           const dropped = droppedFrames.value;
           droppedFrames.value = 0;
           onWorkletResult({
-            detections: decoded,
+            detections: decodedOut,
             inferenceMs,
             frameSize: { width: frameW, height: frameH },
             updatedAtMs: now,
@@ -397,9 +659,11 @@ export function useYoloDetector() {
               letterboxMs,
               inferenceMs,
               decodeMs,
+              speedClsMs,
+              speedClsRan,
               totalMs,
               droppedFramesSinceLastReport: dropped,
-              numDetections: decoded.length,
+              numDetections: decodedOut.length,
             },
           });
         }
@@ -427,11 +691,13 @@ export function useYoloDetector() {
       onWorkletResult,
       isProcessing,
       lastReportAtMs,
-      output0Shape,
       droppedFrames,
       lastErrorAtMs,
       onWorkletError,
       activeYoloParams,
+      speedModel,
+      speedLabels,
+      speedBases,
     ]
   );
 
@@ -449,6 +715,7 @@ export function useYoloDetector() {
     lastLogFilePath,
 
     // models ui/actions
+    hasSelectedModel: activeModelItem != null,
     activeModelItem,
     activeYoloParams,
     models,
@@ -458,10 +725,19 @@ export function useYoloDetector() {
     setActiveModel,
     ensureDownloaded,
     deleteDownloaded,
+    isClearingStorage,
+    clearStorage,
     downloadProgressById,
     manifestGeneratedAt,
     manifestUrl,
     storageRoot,
+
+    // speed classifier (optional)
+    isSpeedModelLoaded,
+    speedModelState,
+    speedModelErrorMessage,
+    speedLabels,
+    speedBases,
   };
 }
 

@@ -22,11 +22,13 @@ import type { Detection } from '../types/detection';
 import type { FrameSize } from '../types/detection';
 import Svg, { Circle, Path, Rect as SvgRect, Text as SvgText } from 'react-native-svg';
 import { signByLabel } from '../signs/signRegistry';
+import DebugMetrics from '../widgets/DebugMetrics';
 
 type StickySign = {
   label: string;
   classId: number;
   bestConfidence: number;
+  speedConfidence: number | undefined;
   count: number;
   lastSeenMs: number;
 };
@@ -80,6 +82,8 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     modelErrorMessage,
     lastFrameSize,
     lastLogFilePath,
+    isSpeedModelLoaded,
+    speedModelState,
 
     activeModelItem,
     models,
@@ -90,8 +94,12 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     ensureDownloaded,
     deleteDownloaded,
     downloadProgressById,
+    isClearingStorage,
+    clearStorage,
     manifestGeneratedAt,
   } = useYoloDetector();
+
+  const hasSelectedModel = activeModelItem != null;
 
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number }>({
     width: 0,
@@ -191,22 +199,25 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
     // Группируем текущие детекции по label.
     const frame = new Map<
       string,
-      { label: string; classId: number; bestConfidence: number; count: number }
+      { label: string; classId: number; bestConfidence: number; count: number; speedConfidence: number | undefined }
     >();
     for (let i = 0; i < detections.length; i++) {
       const d = detections[i] as Detection | undefined;
       if (!d) continue;
-      const prev = frame.get(d.label);
+      const label = d.refinedLabel ?? d.label;
+      const prev = frame.get(label);
       if (!prev) {
-        frame.set(d.label, {
-          label: d.label,
+        frame.set(label, {
+          label,
           classId: d.classId,
           bestConfidence: d.confidence,
           count: 1,
+          speedConfidence: d.refinedConfidence,
         });
       } else {
         prev.count += 1;
         if (d.confidence > prev.bestConfidence) prev.bestConfidence = d.confidence;
+        if (d.refinedConfidence) prev.speedConfidence = d.refinedConfidence;
       }
     }
 
@@ -219,6 +230,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
         if (existing) {
           existing.lastSeenMs = now;
           existing.bestConfidence = Math.max(existing.bestConfidence, v.bestConfidence);
+          existing.speedConfidence = v.speedConfidence;
           existing.count = v.count;
           existing.classId = v.classId;
         } else {
@@ -226,6 +238,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
             label: v.label,
             classId: v.classId,
             bestConfidence: v.bestConfidence,
+            speedConfidence: v.speedConfidence,
             count: v.count,
             lastSeenMs: now,
           });
@@ -323,7 +336,8 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                       {s.label}
                     </Text>
                     <Text style={styles.signSub}>
-                      {(s.bestConfidence * 100).toFixed(0)}% · x{s.count}
+                      {(s.bestConfidence * 100).toFixed(0)}% · x{s.count};
+                      {(s.speedConfidence ? s.speedConfidence * 100 : 0).toFixed(0)}% · x{s.count}
                     </Text>
                   </View>
                 </View>
@@ -347,6 +361,17 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                   resizeMode="contain"
                 />
 
+                {!hasSelectedModel && (
+                  <View pointerEvents="none" style={styles.noModelOverlay}>
+                    <View style={styles.noModelCard}>
+                      <Text style={styles.noModelTitle}>Нет выбранной модели</Text>
+                      <Text style={styles.noModelText}>
+                        Открой “Модель”, обнови список и выбери модель для детекции.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
                 {(isDevBuild || isDebug) && (
                   <DetectionOverlay
                     detections={detections}
@@ -354,6 +379,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                     viewSize={previewSize}
                   />
                 )}
+
               </>
             ) : !hasPermission ? (
               permissionUi
@@ -419,19 +445,11 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                 </View>
               )}
 
-              <View style={styles.metrics}>
-                <Metric label="FPS" value={stats.fps.toFixed(1)} />
-                <Metric
-                  label="Total, ms"
-                  value={stats.lastTotalMs.toFixed(1)}
-                />
-                <Metric
-                  label="Inference, ms"
-                  value={stats.lastInferenceMs.toFixed(1)}
-                />
-                <Metric label="Objects" value={String(stats.lastNumDetections)} />
-                <Metric label="Input" value={`${stats.inputSize}x${stats.inputSize}`} />
-              </View>
+              <DebugMetrics
+                stats={stats}
+                isSpeedModelLoaded={isSpeedModelLoaded}
+                speedModelState={speedModelState}
+              />
 
               {modelState === 'error' && (
                 <View style={styles.errorBox}>
@@ -461,7 +479,10 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
         <View style={[styles.modalRoot, modelPickerSafePadding]} pointerEvents="box-none">
           <Pressable
             style={styles.modalBackdrop}
-            onPress={() => setIsModelPickerOpen(false)}
+            onPress={() => {
+              if (isClearingStorage) return;
+              setIsModelPickerOpen(false);
+            }}
           />
 
           <View style={styles.modalCard}>
@@ -478,8 +499,33 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                     pressed && styles.buttonPressed,
                   ]}
                   onPress={() => refreshManifest()}
+                  disabled={isClearingStorage}
                 >
                   <Text style={styles.smallButtonText}>Обновить</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.modalTopActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modelActionButton,
+                    styles.modelActionButtonDanger,
+                    pressed && styles.buttonPressed,
+                    isClearingStorage && styles.buttonDisabled,
+                  ]}
+                  onPress={async () => {
+                    await clearStorage();
+                  }}
+                  disabled={isClearingStorage}
+                >
+                  <View style={styles.clearRow}>
+                    {isClearingStorage && (
+                      <ActivityIndicator color="#fff" size="small" />
+                    )}
+                    <Text style={styles.modelActionText}>
+                      {isClearingStorage ? 'Очищаю…' : 'Очистить хранилище'}
+                    </Text>
+                  </View>
                 </Pressable>
               </View>
 
@@ -498,7 +544,8 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                 {models.map(m => {
                   const isDownloading = downloadProgressById[m.id] != null;
                   const progress = downloadProgressById[m.id] ?? 0;
-                  const canDelete = !m.isBundled && m.isDownloaded && !m.isActive;
+                  const canDelete = m.isDownloaded && !m.isActive;
+                  const disabledAll = isClearingStorage;
 
                   return (
                     <View key={m.id} style={styles.modelRow}>
@@ -507,11 +554,9 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                           {m.title}
                         </Text>
                         <Text style={styles.modelRowSub} numberOfLines={2}>
-                          {m.isBundled
-                            ? 'bundled'
-                            : m.isDownloaded
-                              ? `скачана · imgsz=${m.inputSize}`
-                              : `не скачана · imgsz=${m.inputSize}`}
+                        {m.isDownloaded
+                          ? `скачана · imgsz=${m.inputSize}`
+                          : `не скачана · imgsz=${m.inputSize}`}
                           {m.isActive ? ' · active' : ''}
                         </Text>
                         {isDownloading && (
@@ -522,7 +567,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                       </View>
 
                       <View style={styles.modelRowActions}>
-                        {!m.isBundled && !m.isDownloaded ? (
+                        {!m.isDownloaded ? (
                           <Pressable
                             style={({ pressed }) => [
                               styles.modelActionButton,
@@ -535,7 +580,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                                 // Ошибка уже будет показана через Alert внутри хука/или здесь.
                               }
                             }}
-                            disabled={isDownloading}
+                            disabled={isDownloading || disabledAll}
                           >
                             <Text style={styles.modelActionText}>
                               {isDownloading ? '...' : 'Скачать'}
@@ -549,10 +594,14 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                               m.isActive && styles.modelActionButtonActive,
                             ]}
                             onPress={async () => {
-                              if (!m.isBundled && !m.isDownloaded) return;
+                              if (!m.isDownloaded) return;
                               await setActiveModel(m.id);
                             }}
-                            disabled={m.isActive || (!m.isBundled && !m.isDownloaded)}
+                            disabled={
+                              disabledAll ||
+                              m.isActive ||
+                              !m.isDownloaded
+                            }
                           >
                             <Text style={styles.modelActionText}>
                               {m.isActive ? 'Выбрана' : 'Выбрать'}
@@ -570,6 +619,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                             onPress={async () => {
                               await deleteDownloaded(m.id);
                             }}
+                            disabled={disabledAll}
                           >
                             <Text style={styles.modelActionText}>Удалить</Text>
                           </Pressable>
@@ -584,8 +634,13 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
                 style={({ pressed }) => [
                   styles.button,
                   pressed && styles.buttonPressed,
+                  isClearingStorage && styles.buttonDisabled,
                 ]}
-                onPress={() => setIsModelPickerOpen(false)}
+                onPress={() => {
+                  if (isClearingStorage) return;
+                  setIsModelPickerOpen(false);
+                }}
+                disabled={isClearingStorage}
               >
                 <Text style={styles.buttonText}>Закрыть</Text>
               </Pressable>
@@ -597,14 +652,7 @@ export function CameraDetectionScreen(props: { onOpenVideoTest?: () => void }) {
   );
 }
 
-function Metric(props: { label: string; value: string }) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{props.label}</Text>
-      <Text style={styles.metricValue}>{props.value}</Text>
-    </View>
-  );
-}
+
 
 function SignSvg(props: { label: string; confidence: number }) {
   const conf = Math.max(0, Math.min(1, props.confidence));
@@ -612,7 +660,8 @@ function SignSvg(props: { label: string; confidence: number }) {
   const short =
     props.label.length > 10 ? props.label.slice(0, 10).trim() + '…' : props.label;
 
-  const Sign = signByLabel[props.label];
+  const base = props.label.split('_')[0] ?? props.label;
+  const Sign = signByLabel[props.label] ?? signByLabel[base];
   if (Sign) {
     // Большинство наших SVG из датасета идут без viewBox (только width/height=100x86).
     // Если просто поставить width/height=54, картинка будет клипаться/выходить за границы.
@@ -774,6 +823,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
+  noModelOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  noModelCard: {
+    maxWidth: 420,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 15, 18, 0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  noModelTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  noModelText: {
+    marginTop: 6,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
   debugPanel: {
     position: 'absolute',
     top: 0,
@@ -886,6 +963,15 @@ const styles = StyleSheet.create({
   modalErrorText: {
     color: 'rgba(255, 120, 120, 0.95)',
   },
+  modalTopActions: {
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  clearRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   modalList: {
     marginTop: 6,
     marginBottom: 10,
@@ -940,29 +1026,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '900',
-  },
-  metrics: {
-    marginTop: 10,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  metric: {
-    minWidth: 120,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  metricLabel: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 12,
-  },
-  metricValue: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 2,
   },
   center: {
     flex: 1,

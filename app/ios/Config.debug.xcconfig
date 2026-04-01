@@ -8,5 +8,9 @@
 // Configuration settings file format documentation can be found at:
 // https://help.apple.com/xcode/#/dev745c5c974
 
+// /Users/elmanovsm/personal/cv/graduation/app/ios/Pods/Target Support Files/Pods-app/Pods-app.debug.xcconfig
+
+#include "/Users/elmanovsm/personal/cv/graduation/app/ios/Pods/Target Support Files/Pods-app/Pods-app.debug.xcconfig"
+
 WRITE_LOGS = 0
-SHOW_SPEED_ROI = 1
+ENVFILE=.env

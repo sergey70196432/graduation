@@ -397,6 +397,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;
+				WRITE_LOGS = 0;
 			};
 			name = Debug;
 		};
@@ -474,6 +475,7 @@
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;
+				WRITE_LOGS = 0;
 			};
 			name = Release;
 		};

@@ -40,7 +40,10 @@ export function DetectionOverlay({ detections, frameSize, viewSize }: Props) {
           const w = d.bbox.width * scale;
           const h = d.bbox.height * scale;
 
-          const label = `${d.label} ${(d.confidence * 100).toFixed(0)}%`;
+          const shown = d.refinedLabel ?? d.label;
+          const label = d.refinedLabel
+            ? `${shown} · yolo ${(d.confidence * 100).toFixed(0)}%`
+            : `${shown} ${(d.confidence * 100).toFixed(0)}%`;
           const textY = Math.max(14, y - 6);
 
           return (
