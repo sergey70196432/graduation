@@ -8,7 +8,7 @@
 ## Где что лежит
 
 - **Скрипт генерации датасета**: `make_dataset/generate_speed_classifier_dataset.py`
-- **(опционально) ноутбук SVG → PNG разных размеров**: `make_dataset/genefate_speed_pngs.ipynb`
+- **(опционально) ноутбук SVG → PNG разных размеров**: `make_dataset/generate_speed_pngs.ipynb`
 - **Выходной датасет**: `datasets/speed_cls_v<n>/`
   - `train/<class>/*.png`
   - `val/<class>/*.png` (если включено)
@@ -26,7 +26,7 @@
 python -m pip install -r make_dataset/requirements.txt
 ```
 
-Если используете ноутбук `genefate_speed_pngs.ipynb`, нужен `rsvg-convert` (librsvg):
+Если используете ноутбук `generate_speed_pngs.ipynb`, нужен `rsvg-convert` (librsvg):
 - macOS: `brew install librsvg`
 - Ubuntu: `sudo apt-get install librsvg2-bin`
 
@@ -34,7 +34,7 @@ python -m pip install -r make_dataset/requirements.txt
 
 ## Шаг 1 (опционально). Сгенерировать PNG разных размеров из SVG
 
-Ноутбук: `make_dataset/genefate_speed_pngs.ipynb`
+Ноутбук: `make_dataset/generate_speed_pngs.ipynb`
 
 ### Вход
 - `shared/signs/speed_png/*.svg` с именами `<base>_<speed>.svg`, например `3.24_50.svg`.

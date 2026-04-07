@@ -22,7 +22,7 @@
   - детекция в реальном времени (frame processor)
   - overlay (bbox) в debug сборке всегда, в релизе — скрыто (подробнее в `docs/build-modes.md`)
   - выбор модели (попап в колонке “Знаки”)
-  - экспорт логов производительности (если включено флагом, см. `docs/performance.md`)
+  - экспорт логов производительности (если в `.env` задано `WRITE_LOGS=1`, см. `src/hooks/useYoloDetector.ts`)
 
 - **Video mode**
   - выбор видео из Files или Photos

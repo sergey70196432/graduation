@@ -20,7 +20,6 @@
 - [Модели и манифест](./docs/models.md)
 - [Архитектура пайплайна](./docs/pipeline.md)
 - [Debug/Release сборки](./docs/build-modes.md)
-- [Производительность](./docs/performance.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 - [Dev notes](./docs/dev-notes.md)
 

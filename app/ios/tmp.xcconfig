@@ -1,0 +1,2 @@
+WRITE_LOGS=0
+MODELS_MANIFEST_URL=https:/$()/storage.yandexcloud.net/signs-models/manifest.json

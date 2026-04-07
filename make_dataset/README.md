@@ -5,7 +5,7 @@
 - **Датасет для классификатора скорости (значение на знаке)**:
   - см. `make_dataset/README_speed_classifier_dataset.md`
   - основной скрипт: `make_dataset/generate_speed_classifier_dataset.py`
-  - (опционально) генерация PNG разных размеров из SVG: `make_dataset/genefate_speed_pngs.ipynb`
+  - (опционально) генерация PNG разных размеров из SVG: `make_dataset/generate_speed_pngs.ipynb`
 
 - **YOLO датасет детекции знаков (синтетика + внешние данные)**:
   - см. `make_dataset/README_yolo_signs_dataset.md`
@@ -34,7 +34,7 @@ python -m pip install -r make_dataset/requirements.txt
   - `rsvg-convert` (librsvg) или
   - `inkscape`
 
-В ноутбуке `make_dataset/genefate_speed_pngs.ipynb` используется `rsvg-convert`.
+В ноутбуке `make_dataset/generate_speed_pngs.ipynb` используется `rsvg-convert`.
 
 ---
 
