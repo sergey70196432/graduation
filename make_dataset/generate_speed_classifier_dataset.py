@@ -67,6 +67,25 @@ MAX_OUTPUT_SIDE = 512
 VAL_RATIO = 0.20
 TEST_RATIO = 0.10
 
+# Балансировка классов.
+# Проблема: в SRC_ROOT у разных классов разное число исходных PNG, из-за этого train получается несбалансированным.
+# Решение: генерировать одинаковое число примеров на класс.
+#
+# Как именно балансируем:
+# - downsample: берём "как у самого маленького класса" (датасет меньше, но без перекоса)
+# - upsample  : берём "как у самого большого класса" (датасет больше, но используем всё)
+BALANCE_CLASSES = True
+BALANCE_STRATEGY = "upsample"  # 'downsample' | 'upsample'
+
+# Можно задать явные количества (0 = авто).
+# TRAIN_BASE_PER_CLASS — сколько РАЗНЫХ исходных картинок (из SRC_ROOT) взять в train на класс
+# (потом для каждой делается TRAIN_COPIES_PER_IMAGE и bad-crops).
+TRAIN_BASE_PER_CLASS = 0
+
+# Сколько файлов выбрать в val/test на класс (0 = авто из VAL_RATIO/TEST_RATIO и train-base target).
+VAL_PER_CLASS = 0
+TEST_PER_CLASS = 0
+
 # Минимум картинок на класс в val/test.
 # Если исходных картинок мало, скрипт будет дублировать (это нормально для простого пайплайна).
 MIN_VAL_PER_CLASS = 10
@@ -558,18 +577,54 @@ def make_splits(imgs: list[str], rng: random.Random) -> dict[str, list[str]]:
     if n <= 0:
         return {"train": [], "val": [], "test": []}
 
-    want_val = 0 if float(VAL_RATIO) <= 0 else max(int(MIN_VAL_PER_CLASS), int(round(n * float(VAL_RATIO))))
-    want_test = 0 if float(TEST_RATIO) <= 0 else max(int(MIN_TEST_PER_CLASS), int(round(n * float(TEST_RATIO))))
+    raise RuntimeError("make_splits() больше не используется напрямую. Используйте make_splits_balanced().")
 
-    # Train base: все, либо ограничение
-    train = list(imgs)
-    if int(MAX_TRAIN_BASE_PER_CLASS) > 0:
-        train = train[: int(MAX_TRAIN_BASE_PER_CLASS)]
+
+def _sample_exact(imgs: list[str], rng: random.Random, k: int, *, replace: bool) -> list[str]:
+    """
+    Выбираем ровно k элементов из imgs:
+    - replace=False: без повторов (если imgs >= k)
+    - replace=True : с повторами (если imgs < k или если так явно попросили)
+    """
+    k = int(max(0, k))
+    if k <= 0:
+        return []
+    if not imgs:
+        return []
+    if (not replace) and len(imgs) >= k:
+        tmp = list(imgs)
+        rng.shuffle(tmp)
+        return tmp[:k]
+    return [rng.choice(imgs) for _ in range(k)]
+
+
+def make_splits_balanced(
+    imgs: list[str],
+    rng: random.Random,
+    *,
+    train_base_k: int,
+    val_k: int,
+    test_k: int,
+    downsample: bool,
+) -> dict[str, list[str]]:
+    """
+    Балансированные сплиты: одинаковое число элементов на каждый класс.
+
+    Важно:
+    - train/val/test выбираются независимо
+    - train_base_k — это число исходных картинок (до TRAIN_COPIES_PER_IMAGE и bad-crops)
+    - val/test семплим с повторами (это нормально для маленьких классов)
+    """
+    n = len(imgs)
+    if n <= 0:
+        return {"train": [], "val": [], "test": []}
+
+    train = _sample_exact(imgs, rng, int(train_base_k), replace=(not downsample))
     if not train:
         train = [rng.choice(imgs)]
 
-    val = [rng.choice(imgs) for _ in range(int(want_val))] if want_val > 0 else []
-    test = [rng.choice(imgs) for _ in range(int(want_test))] if want_test > 0 else []
+    val = _sample_exact(imgs, rng, int(val_k), replace=True) if int(val_k) > 0 else []
+    test = _sample_exact(imgs, rng, int(test_k), replace=True) if int(test_k) > 0 else []
 
     return {"train": train, "val": val, "test": test}
 
@@ -642,6 +697,53 @@ def main():
         raise RuntimeError("Не найдено ни одного класса с изображениями (проверь SRC_ROOT).")
 
     # ============================================================
+    # 3.5) Балансировка: выбираем одинаковые размеры сплитов для всех классов
+    # ============================================================
+    lens = [len(class_to_imgs[c]) for c in class_names_sorted]
+    min_n = min(lens) if lens else 0
+    max_n = max(lens) if lens else 0
+
+    # Учитываем ограничение MAX_TRAIN_BASE_PER_CLASS (оно применяется к train-пулу).
+    cap = int(MAX_TRAIN_BASE_PER_CLASS) if int(MAX_TRAIN_BASE_PER_CLASS) > 0 else None
+    if cap is not None:
+        min_n = min(min_n, cap)
+        max_n = min(max_n, cap)
+
+    strategy = str(BALANCE_STRATEGY).strip().lower()
+    if strategy not in ("downsample", "upsample"):
+        raise ValueError("BALANCE_STRATEGY должен быть 'downsample' или 'upsample'.")
+    downsample = strategy == "downsample"
+
+    if not bool(BALANCE_CLASSES):
+        # Старое поведение (небалансированное): размеры зависят от размера класса.
+        # Оставляем как опцию, но по умолчанию лучше балансировать.
+        train_base_k = None
+        val_k = None
+        test_k = None
+    else:
+        # Сколько исходных картинок (до копий/аугментаций) взять в train на класс.
+        if int(TRAIN_BASE_PER_CLASS) > 0:
+            train_base_k = int(TRAIN_BASE_PER_CLASS)
+        else:
+            train_base_k = int(min_n if downsample else max_n)
+        train_base_k = max(1, int(train_base_k))
+
+        # Val/test: либо явно, либо авто от train_base_k и ratio.
+        if float(VAL_RATIO) <= 0:
+            val_k = 0
+        elif int(VAL_PER_CLASS) > 0:
+            val_k = int(VAL_PER_CLASS)
+        else:
+            val_k = max(int(MIN_VAL_PER_CLASS), int(round(float(train_base_k) * float(VAL_RATIO))))
+
+        if float(TEST_RATIO) <= 0:
+            test_k = 0
+        elif int(TEST_PER_CLASS) > 0:
+            test_k = int(TEST_PER_CLASS)
+        else:
+            test_k = max(int(MIN_TEST_PER_CLASS), int(round(float(train_base_k) * float(TEST_RATIO))))
+
+    # ============================================================
     # 4) Подготовка выходной папки и базовых файлов (labels.txt)
     # ============================================================
     if bool(CLEAN_OUTPUT_DIR) and os.path.isdir(out_root):
@@ -661,8 +763,18 @@ def main():
     for class_name in class_names_sorted:
         imgs = class_to_imgs[class_name]
         # Выбираем какие исходные файлы пойдут в train/val/test.
-        # Логика сплитов описана внутри make_splits().
-        split_items = make_splits(imgs, rng)
+        # Важно: при BALANCE_CLASSES=True делаем одинаковое число на каждый класс.
+        if bool(BALANCE_CLASSES):
+            split_items = make_splits_balanced(
+                imgs,
+                rng,
+                train_base_k=int(train_base_k),
+                val_k=int(val_k),
+                test_k=int(test_k),
+                downsample=bool(downsample),
+            )
+        else:
+            split_items = make_splits(imgs, rng)
 
         for split, paths in split_items.items():
             out_dir = os.path.join(out_root, split, class_name)
@@ -717,6 +829,12 @@ def main():
         f.write(f"max_output_side={int(MAX_OUTPUT_SIDE)}\n")
         f.write(f"val_ratio={VAL_RATIO}\n")
         f.write(f"test_ratio={TEST_RATIO}\n")
+        f.write(f"balance_classes={bool(BALANCE_CLASSES)}\n")
+        f.write(f"balance_strategy={str(BALANCE_STRATEGY).strip().lower()}\n")
+        if bool(BALANCE_CLASSES):
+            f.write(f"train_base_per_class={int(train_base_k)}\n")
+            f.write(f"val_per_class={int(val_k)}\n")
+            f.write(f"test_per_class={int(test_k)}\n")
         f.write(f"min_val_per_class={int(MIN_VAL_PER_CLASS)}\n")
         f.write(f"min_test_per_class={int(MIN_TEST_PER_CLASS)}\n")
         f.write(f"max_per_class={MAX_PER_CLASS}\n")

@@ -46,7 +46,7 @@ except Exception:  # pragma: no cover
 
 # Где лежит датасет (папки train/val/test внутри).
 # Обычно генерируется скриптом make_dataset/generate_speed_classifier_dataset.py
-DATA_DIR = "datasets/speed_cls_v1"
+DATA_DIR = "datasets/speed_cls_v5"
 
 # Папка, куда складываются все запуски обучения.
 # Каждый новый запуск автоматически создаёт подпапку run_<n> (run_1, run_2, ...).
@@ -68,9 +68,9 @@ IMAGE_SIZE = 128
 # - LEARNING_RATE: скорость обучения
 # - NUM_WORKERS: сколько воркеров у DataLoader (на macOS иногда лучше 0)
 # - SEED: фиксируем сид, чтобы результаты были воспроизводимее
-EPOCHS = 20
+EPOCHS = 50
 BATCH_SIZE = 64
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
 SEED = 1337
 

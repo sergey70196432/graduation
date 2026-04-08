@@ -520,7 +520,6 @@ def build_transforms(cfg: DatasetConfig, split: str):
                 [transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.02)],
                 p=0.35,
             ),
-            transforms.RandomGrayscale(p=0.04),
             # Перспективные искажения (умеренно, чтобы не "убивать" читаемость цифр)
             transforms.RandomPerspective(distortion_scale=0.4, p=0.28),
             # Наклоны/сдвиги/масштаб/повороты (в одном месте)

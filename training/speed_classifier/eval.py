@@ -41,13 +41,13 @@ except Exception:  # pragma: no cover
 # ============================================================
 
 # Где лежит датасет (папки train/val/test внутри)
-DATA_DIR = "datasets/speed_cls_v1"
+DATA_DIR = "datasets/speed_cls_v4"
 
 # Какой сплит оценивать: 'val' или 'test'
 SPLIT = "test"
 
 # Какой чекпоинт оценивать
-CKPT_PATH = "training/speed_classifier/runs/run1/best.pt"
+CKPT_PATH = "training/speed_classifier/runs/run_1/best.pt"
 
 # Размер входа (должен совпадать с train.py)
 IMAGE_SIZE = 128
