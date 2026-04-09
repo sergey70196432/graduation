@@ -1,1 +1,1 @@
-from training.utils import pick_device
+from py_utils.device import pick_device

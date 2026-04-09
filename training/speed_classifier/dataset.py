@@ -28,6 +28,9 @@ class DatasetConfig:
     image_size: int = 128
     mean: tuple[float, float, float] = (0.485, 0.456, 0.406)
     std: tuple[float, float, float] = (0.229, 0.224, 0.225)
+    # 'default' — как было изначально
+    # 'roi' — усиленный пресет под "боевые" ROI (перспектива/обрезы/компрессия/мыло)
+    aug_preset: str = "default"
 
 
 class ImageFolderFixedClasses(datasets.ImageFolder):
@@ -503,6 +506,8 @@ def build_transforms(cfg: DatasetConfig, split: str):
     if split not in ("train", "val", "test"):
         raise ValueError(f"Unknown split: {split}")
 
+    preset = str(getattr(cfg, "aug_preset", "default") or "default").strip().lower()
+
     if split == "train":
         # Делаем небольшой "оверсэмплинг" по размеру, чтобы геометрия работала на чуть более
         # детальном изображении, а потом уже приводим к финальному 128x128.
@@ -511,6 +516,7 @@ def build_transforms(cfg: DatasetConfig, split: str):
         small_threshold = int(round(float(cfg.image_size) * 0.75))  # например, <96 при IMAGE_SIZE=128
         small_pre_size = int(round(float(cfg.image_size) * 1.05))   # например, ~134 при IMAGE_SIZE=128
 
+        # Базовые аугментации
         aug = [
             transforms.RandomApply(
                 [RandomDownscaleUpscale(0.55, 0.95, min_side_for_strong=pre_size, min_scale_if_small=0.85)],
@@ -535,6 +541,37 @@ def build_transforms(cfg: DatasetConfig, split: str):
             RandomDirtAndStains(p=0.18, max_stains=5),
             RandomGlareLines(p=0.10, max_lines=2),
         ]
+
+        # Усиленный пресет под "боевые" ROI: больше вероятностей и диапазонов,
+        # но стараемся не уничтожать цифры полностью.
+        if preset == "roi":
+            aug = [
+                transforms.RandomApply(
+                    [RandomDownscaleUpscale(0.38, 0.95, min_side_for_strong=pre_size, min_scale_if_small=0.80)],
+                    p=0.48,
+                ),
+                transforms.RandomApply(
+                    [transforms.ColorJitter(brightness=0.36, contrast=0.36, saturation=0.24, hue=0.035)],
+                    p=0.50,
+                ),
+                transforms.RandomPerspective(distortion_scale=0.58, p=0.40),
+                transforms.RandomAffine(
+                    degrees=16,
+                    translate=(0.11, 0.11),
+                    scale=(0.80, 1.18),
+                    shear=(-12, 12),
+                ),
+                RandomZoomOutToBackground(p=0.42, min_scale=0.35, max_scale=1.0, noise=20),
+                RandomEdgeCutAndResizeBack(p=0.32, max_cut_frac=0.20),
+                RandomDirtAndStains(p=0.28, max_stains=7),
+                RandomGlareLines(p=0.18, max_lines=3),
+            ]
+
+            # torchvision-опциональные аугментации (на старых версиях может отсутствовать)
+            if hasattr(transforms, "RandomAutocontrast"):
+                aug.append(transforms.RandomAutocontrast(p=0.22))
+            if hasattr(transforms, "RandomAdjustSharpness"):
+                aug.append(transforms.RandomAdjustSharpness(sharpness_factor=2.0, p=0.22))
     else:
         pre_size = int(cfg.image_size)
         small_threshold = int(cfg.image_size)
@@ -547,13 +584,21 @@ def build_transforms(cfg: DatasetConfig, split: str):
     if split == "train":
         tail = [
             # Артефакты качества лучше применять уже на финальном размере (как "камера/видео")
-            RandomJpegCompression(p=0.12, q_min=35, q_max=95),
-            RandomMotionBlur(p=0.10, k_min=5, k_max=11),
-            transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.4))], p=0.14),
+            RandomJpegCompression(p=(0.30 if preset == "roi" else 0.12), q_min=(14 if preset == "roi" else 35), q_max=95),
+            RandomMotionBlur(p=(0.24 if preset == "roi" else 0.10), k_min=5, k_max=(17 if preset == "roi" else 11)),
+            transforms.RandomApply(
+                [transforms.GaussianBlur(kernel_size=3, sigma=((0.1, 2.6) if preset == "roi" else (0.1, 1.4)))],
+                p=(0.26 if preset == "roi" else 0.14),
+            ),
             transforms.ToTensor(),  # uint8 HWC -> float CHW in 0..1
-            RandomGaussianNoise(p=0.25, std_min=0.0, std_max=0.03),
+            RandomGaussianNoise(p=(0.42 if preset == "roi" else 0.25), std_min=0.0, std_max=(0.055 if preset == "roi" else 0.03)),
             # RandomErasing работает по tensor, поэтому ставим после ToTensor
-            transforms.RandomErasing(p=0.08, scale=(0.02, 0.08), ratio=(0.3, 3.3), value="random"),
+            transforms.RandomErasing(
+                p=(0.12 if preset == "roi" else 0.08),
+                scale=((0.02, 0.10) if preset == "roi" else (0.02, 0.08)),
+                ratio=(0.3, 3.3),
+                value="random",
+            ),
             transforms.Normalize(cfg.mean, cfg.std),
         ]
     else:

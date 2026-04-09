@@ -18,6 +18,7 @@
   чтобы не затирать предыдущие версии и иметь воспроизводимость.
 """
 
+import json
 import os
 import random
 import re
@@ -103,19 +104,20 @@ MAX_PER_CLASS = 0
 
 # Сколько "вариантов" сделать из одной картинки в train.
 # Вариант = тот же знак, но с другим фоном (и размером/паддингом как есть).
-TRAIN_COPIES_PER_IMAGE = 20
+TRAIN_COPIES_PER_IMAGE = 24
 
 # Максимум разных исходных картинок на класс, которые пойдут в train (0 = все).
 # Удобно, если у вас очень много исходников, и датасет получается слишком большой.
 MAX_TRAIN_BASE_PER_CLASS = 0
 
-# Небольшая деградация качества прямо в генераторе (помогает, когда train-aug выключены/слабые)
-GEN_BLUR_PROB = 0.20
+# Небольшая деградация качества прямо в генераторе.
+# Держим её умеренной, но уже ближе к реальным видео-ROI.
+GEN_BLUR_PROB = 0.28
 GEN_BLUR_SIGMA_MIN = 0.2
-GEN_BLUR_SIGMA_MAX = 1.2
-GEN_NOISE_PROB = 0.25
+GEN_BLUR_SIGMA_MAX = 1.6
+GEN_NOISE_PROB = 0.32
 GEN_NOISE_STD_MIN = 0.0
-GEN_NOISE_STD_MAX = 7.0  # в uint8
+GEN_NOISE_STD_MAX = 9.0  # в uint8
 
 # Генерация "плохих кропов" (только для train).
 # Имитируем ситуации, когда YOLO дал неточный ROI:
@@ -125,27 +127,47 @@ GEN_NOISE_STD_MAX = 7.0  # в uint8
 # - качество похоже на видео (JPEG/смаз).
 ENABLE_BAD_CROPS = True
 # Доля train-копий, которые превращаем в "bad crop"
-BAD_CROP_PROB = 0.35
+BAD_CROP_PROB = 0.55
 # Дополнительно "плохих" вариантов на одну исходную картинку (помимо TRAIN_COPIES_PER_IMAGE)
-BAD_CROP_EXTRA_PER_IMAGE = 0
+BAD_CROP_EXTRA_PER_IMAGE = 4
 
 # "Zoom-out" (знак меньше в кадре): масштаб уменьшенной вставки относительно исходного размера
-BAD_CROP_MIN_SCALE = 0.55
-BAD_CROP_MAX_SCALE = 0.95
+BAD_CROP_MIN_SCALE = 0.40
+BAD_CROP_MAX_SCALE = 0.92
 
 # Подрезание краёв (имитация промаха bbox)
-BAD_CROP_EDGE_CUT_PROB = 0.25
-BAD_CROP_MAX_CUT_FRAC = 0.12
+BAD_CROP_EDGE_CUT_PROB = 0.38
+BAD_CROP_MAX_CUT_FRAC = 0.18
 
 # JPEG-артефакты
-BAD_CROP_JPEG_PROB = 0.22
-BAD_CROP_JPEG_Q_MIN = 30
-BAD_CROP_JPEG_Q_MAX = 90
+BAD_CROP_JPEG_PROB = 0.35
+BAD_CROP_JPEG_Q_MIN = 18
+BAD_CROP_JPEG_Q_MAX = 82
 
 # Motion blur
-BAD_CROP_MOTION_BLUR_PROB = 0.18
+BAD_CROP_MOTION_BLUR_PROB = 0.28
 BAD_CROP_MOTION_BLUR_K_MIN = 5
-BAD_CROP_MOTION_BLUR_K_MAX = 13
+BAD_CROP_MOTION_BLUR_K_MAX = 15
+
+# Реальные фоны (важно для качества на реальных ROI).
+# Если True — будем класть знак не на серый фон, а на случайный кроп из реальных фотографий/кадров.
+# Это сильно снижает доменный сдвиг между синтетикой и реальными ROI.
+USE_REAL_BACKGROUNDS = True
+BACKGROUND_DIRS = [
+    "make_dataset/dashcam_frames",
+    "make_dataset/backgrounds",
+]
+# Сколько фонов держать в RAM (простая LRU-кешировка чтения).
+BG_CACHE_MAX_ITEMS = 64
+# Если фон очень большой — уменьшаем для скорости (0 = не ограничивать).
+BG_MAX_SIDE_FOR_CACHE = 1280
+
+# Добавление реальных ROI в train поверх синтетики.
+# Это позволяет уменьшить доменный сдвиг, сохранив ту же 105-классовую постановку.
+INCLUDE_REAL_ROI_IN_TRAIN = True
+REAL_ROI_INDEX_JSONL = "speed_test_roi/roi_index.jsonl"
+# 1 = один раз добавить каждый ROI, 40 = агрессивный overweight реальных примеров.
+REAL_ROI_REPEAT = 40
 
 
 # ============================================================
@@ -200,8 +222,9 @@ def iter_images_recursive(root: str):
     - в исходных данных иногда бывает вложенная структура (например разные размеры в подпапках),
       и мы хотим собрать всё.
     """
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for fn in filenames:
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for fn in sorted(filenames):
             if is_image_file(fn):
                 yield os.path.join(dirpath, fn)
 
@@ -372,6 +395,88 @@ def random_bg_color(rng: random.Random) -> tuple[int, int, int]:
     return (v, v2, v3)
 
 
+# Пул фоновых картинок и кеш чтения.
+_BG_PATHS: list[str] = []
+_BG_CACHE: dict[str, np.ndarray] = {}
+_BG_CACHE_KEYS: list[str] = []
+_NP_RNG: np.random.Generator | None = None
+
+
+def _get_np_rng() -> np.random.Generator:
+    if _NP_RNG is None:
+        raise RuntimeError("NumPy RNG is not initialized. Call main() first.")
+    return _NP_RNG
+
+
+def _read_bgr_cached(path: str) -> np.ndarray | None:
+    """
+    Читаем фон (BGR) с простым кешем, чтобы не читать один и тот же файл много раз.
+    """
+    p = str(path)
+    if p in _BG_CACHE:
+        return _BG_CACHE[p]
+    img = cv2.imread(p, cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    if int(BG_MAX_SIDE_FOR_CACHE) > 0:
+        img = limit_max_side(img, int(BG_MAX_SIDE_FOR_CACHE))
+    # LRU eviction
+    _BG_CACHE[p] = img
+    _BG_CACHE_KEYS.append(p)
+    if len(_BG_CACHE_KEYS) > int(BG_CACHE_MAX_ITEMS):
+        k = _BG_CACHE_KEYS.pop(0)
+        _BG_CACHE.pop(k, None)
+    return img
+
+
+def _pick_background_patch(size: int, rng: random.Random) -> np.ndarray:
+    """
+    Возвращаем квадратный BGR-патч размера size x size.
+    Если фоновых картинок нет — используем серый фон.
+    """
+    s = int(max(8, size))
+    if not _BG_PATHS:
+        bg = np.zeros((s, s, 3), dtype=np.uint8)
+        bg[:, :] = np.array(random_bg_color(rng), dtype=np.uint8)[None, None, :]
+        return bg
+
+    # Несколько попыток найти читаемый фон.
+    for _ in range(6):
+        p = rng.choice(_BG_PATHS)
+        img = _read_bgr_cached(p)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        if h < 8 or w < 8:
+            continue
+        # Если фон меньше нужного — апскейлим (лучше так, чем падать).
+        if h < s or w < s:
+            img2 = cv2.resize(img, (max(s, w), max(s, h)), interpolation=cv2.INTER_LINEAR)
+            img = img2
+            h, w = img.shape[:2]
+        x0 = int(rng.randint(0, max(0, w - s)))
+        y0 = int(rng.randint(0, max(0, h - s)))
+        patch = img[y0 : y0 + s, x0 : x0 + s].copy()
+        return patch
+
+    bg = np.zeros((s, s, 3), dtype=np.uint8)
+    bg[:, :] = np.array(random_bg_color(rng), dtype=np.uint8)[None, None, :]
+    return bg
+
+
+def rgba_over_bgr_patch(rgba: np.ndarray, bgr_patch: np.ndarray) -> np.ndarray:
+    """
+    Накладываем RGBA-объект на готовый BGR-патч того же размера.
+    """
+    h, w = rgba.shape[:2]
+    if bgr_patch.shape[0] != h or bgr_patch.shape[1] != w:
+        bgr_patch = cv2.resize(bgr_patch, (w, h), interpolation=cv2.INTER_LINEAR)
+    rgb = rgba[:, :, :3].astype(np.float32)
+    a = (rgba[:, :, 3:4].astype(np.float32)) / 255.0
+    out = bgr_patch.astype(np.float32) * (1.0 - a) + rgb[:, :, ::-1] * a
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def _jpeg_compress_bgr(bgr: np.ndarray, quality: int) -> np.ndarray:
     """
     JPEG encode/decode через OpenCV (BGR).
@@ -443,7 +548,7 @@ def _zoom_out_to_background(bgr: np.ndarray, rng: random.Random, min_scale: floa
     bg = np.zeros((h, w, 3), dtype=np.uint8)
     bg[:, :] = np.array(random_bg_color(rng), dtype=np.uint8)[None, None, :]
     # лёгкий шум на фон (через numpy, он уже seeded выше)
-    n = np.random.normal(0.0, 6.0, size=bg.shape).astype(np.float32)
+    n = _get_np_rng().normal(0.0, 6.0, size=bg.shape).astype(np.float32)
     bg = np.clip(bg.astype(np.float32) + n, 0, 255).astype(np.uint8)
 
     x0 = int(rng.randint(0, max(0, w - nw)))
@@ -522,13 +627,33 @@ def make_plain_example(rgba: np.ndarray, out_size: int, rng: random.Random) -> n
     - приводим к квадрату
     - опционально ресайзим до фиксированного размера
     """
-    bgr = rgba_to_bgr_over_solid(rgba, random_bg_color(rng))
-    # Сначала делаем квадрат (без ресайза), чтобы сохранить "родное" разрешение,
-    # а затем уже по настройке либо ресайзим до IMAGE_SIZE, либо оставляем как есть.
-    bgr = pad_to_square(bgr)
+    # 1) Делаем квадратный RGBA (важно: альфа должна соответствовать новой геометрии).
+    # Примечание: pad_to_square выше работает для BGR, поэтому для RGBA делаем вручную через BORDER_REPLICATE.
+    h, w = rgba.shape[:2]
+    m = max(h, w)
+    pad_y = (m - h) // 2
+    pad_x = (m - w) // 2
+    rgba_sq = cv2.copyMakeBorder(
+        rgba,
+        top=pad_y,
+        bottom=m - h - pad_y,
+        left=pad_x,
+        right=m - w - pad_x,
+        borderType=cv2.BORDER_REPLICATE,
+    )
+
+    # 2) Выбираем фон (реальный или серый) и накладываем RGBA.
+    if bool(USE_REAL_BACKGROUNDS):
+        bg = _pick_background_patch(int(rgba_sq.shape[0]), rng)
+        bgr = rgba_over_bgr_patch(rgba_sq, bg)
+    else:
+        bgr = rgba_to_bgr_over_solid(rgba_sq, random_bg_color(rng))
+
+    # 3) Опциональный фиксированный resize до out_size.
     if bool(RESIZE_OUTPUT_TO_IMAGE_SIZE):
-        return resize_to_square(bgr, out_size)
-    # Ограничим максимальный размер, чтобы не раздувать датасет.
+        return cv2.resize(bgr, (int(out_size), int(out_size)), interpolation=cv2.INTER_AREA)
+
+    # 4) Ограничим максимальный размер, чтобы не раздувать датасет.
     bgr = limit_max_side(bgr, int(MAX_OUTPUT_SIDE))
 
     # Лёгкая деградация качества (очень простая)
@@ -538,7 +663,7 @@ def make_plain_example(rgba: np.ndarray, out_size: int, rng: random.Random) -> n
     if rng.random() < float(GEN_NOISE_PROB):
         std = rng.uniform(float(GEN_NOISE_STD_MIN), float(GEN_NOISE_STD_MAX))
         if std > 0:
-            n = np.random.normal(0.0, float(std), size=bgr.shape).astype(np.float32)
+            n = _get_np_rng().normal(0.0, float(std), size=bgr.shape).astype(np.float32)
             bgr = np.clip(bgr.astype(np.float32) + n, 0, 255).astype(np.uint8)
 
     return bgr
@@ -634,8 +759,9 @@ def main():
     # 0) Инициализация (сид, пути, базовые проверки параметров)
     # ============================================================
     rng = random.Random(int(SEED))
-    # Чтобы результат был воспроизводимым (шум генерим через numpy)
-    np.random.seed(int(SEED))
+    # Чтобы результат был воспроизводимым, держим отдельный numpy RNG.
+    global _NP_RNG
+    _NP_RNG = np.random.default_rng(int(SEED))
     src_root = os.path.abspath(SRC_ROOT)
     # Выбор папки вывода.
     # По умолчанию каждый запуск — новая версия speed_cls_v<n>.
@@ -646,6 +772,22 @@ def main():
 
     if not os.path.isdir(src_root):
         raise FileNotFoundError(f"Не найдена папка с PNG-кропами: {src_root}")
+
+    # ============================================================
+    # 0.5) Собираем список фоновых картинок (если включено)
+    # ============================================================
+    global _BG_PATHS
+    _BG_PATHS = []
+    if bool(USE_REAL_BACKGROUNDS):
+        for d in BACKGROUND_DIRS:
+            p = os.path.abspath(str(d))
+            if not os.path.isdir(p):
+                continue
+            _BG_PATHS.extend(list(iter_images_recursive(p)))
+        # Чтобы генерация была воспроизводимее, фиксируем порядок, а выбор делаем через rng.
+        _BG_PATHS = sorted(list({str(x) for x in _BG_PATHS}))
+        if not _BG_PATHS:
+            print("[WARN] USE_REAL_BACKGROUNDS=True, но фоновые картинки не найдены. Будет серый фон.")
 
     if VAL_RATIO < 0 or TEST_RATIO < 0 or (VAL_RATIO + TEST_RATIO) >= 1.0:
         raise ValueError("Плохие значения VAL_RATIO / TEST_RATIO (нужно VAL+TEST < 1).")
@@ -816,6 +958,50 @@ def main():
                     counts[split] += 1
 
     # ============================================================
+    # 5.5) Добавляем реальные ROI в train (если включено)
+    # ============================================================
+    real_roi_added_unique = 0
+    real_roi_added_total = 0
+    if bool(INCLUDE_REAL_ROI_IN_TRAIN):
+        roi_index = os.path.abspath(str(REAL_ROI_INDEX_JSONL))
+        if not os.path.isfile(roi_index):
+            print("[WARN] INCLUDE_REAL_ROI_IN_TRAIN=True, но roi_index.jsonl не найден:", roi_index)
+        else:
+            allowed_classes = set(class_names_sorted)
+            roi_items: list[tuple[str, str]] = []
+            with open(roi_index, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    obj = json.loads(s)
+                    roi_rel = str(obj.get("roi_path") or "").strip()
+                    true_cls = str(obj.get("true_class_name") or "").strip()
+                    if not roi_rel or not true_cls:
+                        continue
+                    if true_cls not in allowed_classes:
+                        continue
+                    src = os.path.abspath(os.path.join(os.path.dirname(roi_index), roi_rel))
+                    if not os.path.isfile(src):
+                        continue
+                    roi_items.append((true_cls, src))
+
+            roi_items = sorted(roi_items, key=lambda x: (x[0], os.path.basename(x[1]), x[1]))
+            for idx, (true_cls, src) in enumerate(roi_items):
+                out_dir = os.path.join(out_root, "train", true_cls)
+                ensure_dir(out_dir)
+                src_base = os.path.basename(src)
+                src_stem, src_ext = os.path.splitext(src_base)
+                src_ext = src_ext.lower() if src_ext else ".jpg"
+                for rep in range(int(max(1, REAL_ROI_REPEAT))):
+                    out_name = f"{true_cls}_realroi_{idx:05d}_{rep:03d}_{src_stem}{src_ext}"
+                    out_path = os.path.join(out_dir, out_name)
+                    shutil.copy2(src, out_path)
+                    counts["train"] += 1
+                    real_roi_added_total += 1
+                real_roi_added_unique += 1
+
+    # ============================================================
     # 6) Пишем статистику (чтобы понимать, что получилось)
     # ============================================================
     stats_path = os.path.join(out_root, "stats.txt")
@@ -850,6 +1036,15 @@ def main():
         f.write(f"bad_crop_max_cut_frac={float(BAD_CROP_MAX_CUT_FRAC)}\n")
         f.write(f"bad_crop_jpeg_prob={float(BAD_CROP_JPEG_PROB)}\n")
         f.write(f"bad_crop_motion_blur_prob={float(BAD_CROP_MOTION_BLUR_PROB)}\n")
+        f.write(f"use_real_backgrounds={bool(USE_REAL_BACKGROUNDS)}\n")
+        f.write(f"background_dirs={BACKGROUND_DIRS}\n")
+        f.write(f"num_background_images={len(_BG_PATHS)}\n")
+        f.write(f"seed={int(SEED)}\n")
+        f.write(f"include_real_roi_in_train={bool(INCLUDE_REAL_ROI_IN_TRAIN)}\n")
+        f.write(f"real_roi_index_jsonl={os.path.abspath(str(REAL_ROI_INDEX_JSONL))}\n")
+        f.write(f"real_roi_repeat={int(REAL_ROI_REPEAT)}\n")
+        f.write(f"real_roi_added_unique={int(real_roi_added_unique)}\n")
+        f.write(f"real_roi_added_total={int(real_roi_added_total)}\n")
         f.write(f"num_classes={len(class_names_sorted)}\n")
         f.write(f"train={counts['train']}\n")
         f.write(f"val={counts['val']}\n")
@@ -858,6 +1053,8 @@ def main():
     print("[OK] Датасет собран:", out_root)
     print("[OK] Train/Val/Test:", counts)
     print("[OK] Labels:", os.path.join(out_root, "labels.txt"))
+    if bool(INCLUDE_REAL_ROI_IN_TRAIN):
+        print("[OK] Real ROI added:", real_roi_added_total, "(unique:", real_roi_added_unique, ")")
 
 
 if __name__ == "__main__":

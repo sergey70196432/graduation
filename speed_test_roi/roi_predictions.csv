@@ -1,0 +1,62 @@
+roi_path,true_class_name,class_name,confidence
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f000315_3.24_d0_s0.873 (3.24_60).jpg,3.24_60,3.24_60,0.3458155393600464
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f000330_3.24_d0_s0.939 (3.24_60).jpg,3.24_60,3.24_60,0.42999041080474854
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f000585_3.24_d0_s0.953 (3.24_60).jpg,3.24_60,3.24_150,0.31088975071907043
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f001125_3.24_d0_s0.778(3.24_60).jpg,3.24_60,3.24_60,0.2951916456222534
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f001140_3.24_d0_s0.934 (3.24_60).jpg,3.24_60,3.24_60,0.3434350788593292
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f001155_3.24_d0_s0.931 (3.24_60).jpg,3.24_60,3.24_60,0.37243762612342834
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092159-000347F_f001170_3.24_d0_s0.899 (3.24_60).jpg,3.24_60,3.24_80,0.3483284115791321
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092259-000348F_f001410_3.24_d0_s0.882 (3.24_80).jpg,3.24_80,3.24_60,0.40457844734191895
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260123-092259-000348F_f001425_3.24_d0_s0.947 (3.24_80).jpg,3.24_80,3.24_60,0.26454246044158936
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260128-155246-000805F_f000345_3.24_d0_s0.915 (3.24_80).jpg,3.24_80,3.24_40,0.2892639935016632
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260128-155246-000805F_f000360_3.24_d0_s0.848 (3.24_80).jpg,3.24_80,3.24_40,0.38736820220947266
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260128-155246-000805F_f000360_3.24_d1_s0.752 (3.24_80).jpg,3.24_80,3.24_80,0.3864099979400635
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260128-155246-000805F_f000375_3.24_d0_s0.896 (3.24_80).jpg,3.24_80,3.24_80,0.3662150800228119
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260209-085751-001734F_f000405_3.24_d0_s0.744 (3.24_60).jpg,3.24_60,3.24_60,0.2892083525657654
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085237-002405F_f001170_3.24_d0_s0.720 (3.24_60).jpg,3.24_60,3.24_60,0.36022770404815674
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085237-002405F_f001260_3.24_d0_s0.924 (3.24_60).jpg,3.24_60,3.24_60,0.4315185248851776
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085337-002406F_f001020_3.24_d0_s0.945 (3.24_60).jpg,3.24_60,3.24_60,0.5596545338630676
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085900-002412F_f000480_3.24_d0_s0.913 (3.24_60).jpg,3.24_60,3.24_60,0.40962401032447815
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085900-002412F_f002355_3.24_d0_s0.810 (3.24_80).jpg,3.24_80,3.24_60,0.4090994894504547
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085900-002412F_f002355_3.24_d1_s0.774 (3.24_80).jpg,3.24_80,3.24_80,0.2582579553127289
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085900-002412F_f002370_3.24_d0_s0.933 (3.24_80).jpg,3.24_80,3.24_60,0.4306964576244354
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-085900-002412F_f002385_3.24_d0_s0.896 (3.24_80).jpg,3.24_80,3.24_80,0.27865079045295715
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-135457-002494F_f000060_3.24_d0_s0.760 (3.24_40).jpg,3.24_40,3.24_40,0.7710171341896057
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-135457-002494F_f000075_3.24_d0_s0.875 (3.24_40).jpg,3.24_40,3.24_40,0.778353750705719
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-135457-002494F_f000090_3.24_d0_s0.921 (3.24_60).jpg,3.24_60,3.24_40,0.3934641182422638
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-135457-002494F_f000255_3.24_d0_s0.777 (3.24_30).jpg,3.24_30,3.24_40,0.40381383895874023
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260219-135457-002494F_f000285_3.24_d0_s0.735 (3.24_30).jpg,3.24_30,3.24_80,0.25085878372192383
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260305-114109-004033F_f000690_3.24_d0_s0.773 (3.24_40).jpg,3.24_40,3.24_40,0.984582781791687
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260305-114109-004033F_f000705_3.24_d0_s0.906 (3.24_40).jpg,3.24_40,3.24_40,0.8397851586341858
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260305-114109-004033F_f000720_3.24_d0_s0.932 (3.24_40).jpg,3.24_40,3.24_40,0.4670325517654419
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260305-114109-004033F_f001080_3.24_d0_s0.920 (3.24_40).jpg,3.24_40,3.24_40,0.9762852787971497
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/EV20260305-114109-004033F_f001095_3.24_d0_s0.930 (3.24_40).jpg,3.24_40,3.24_40,0.6607776284217834
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110101-003260F_f001665_3.24_d0_s0.810 (3.24_30).jpg,3.24_30,3.24_30,0.8843500018119812
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110201-003261F_f000195_3.24_d0_s0.736 (3.24_30).jpg,3.24_30,3.24_20,0.6041429042816162
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110201-003261F_f000255_3.24_d0_s0.734 (3.24_30).jpg,3.24_30,3.24_90,0.40486279129981995
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110201-003261F_f000270_3.24_d0_s0.842 (3.24_30).jpg,3.24_30,3.24_30,0.8139635920524597
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110201-003261F_f000330_3.24_d0_s0.926 (3.24_30).jpg,3.24_30,3.24_30,0.3117622435092926
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110201-003261F_f001020_3.24_d0_s0.717 (3.24_30).jpg,3.24_30,3.24_30,0.2518758773803711
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110301-003262F_f000360_3.24_d0_s0.758 (3.24_30).jpg,3.24_30,3.24_30,0.36972102522850037
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110301-003262F_f000450_3.24_d0_s0.856 (3.24_30).jpg,3.24_30,3.24_60,0.2806113362312317
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110401-003263F_f000210_3.24_d0_s0.951 (3.24_20).jpg,3.24_20,3.24_20,0.989323079586029
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110401-003263F_f000225_3.24_d0_s0.901 (3.24_20).jpg,3.24_20,3.24_20,0.4872981607913971
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110401-003263F_f000240_3.24_d0_s0.865 (3.24_20).jpg,3.24_20,3.24_20,0.3786984980106354
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110401-003263F_f000255_3.24_d0_s0.926 (3.24_20).jpg,3.24_20,3.24_30,0.36496302485466003
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-110401-003263F_f000270_3.24_d0_s0.927 (3.24_20).jpg,3.24_20,3.24_20,0.3209378719329834
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-173605-003270F_f000060_3.24_d0_s0.906 (3.24_30).jpg,3.24_30,3.24_30,0.5975131988525391
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-173605-003270F_f000075_3.24_d0_s0.733 (3.24_30).jpg,3.24_30,3.24_30,0.45996811985969543
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-173705-003271F_f000540_3.24_d0_s0.927 (3.24_30).jpg,3.24_30,3.24_20,0.6254571080207825
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-210920-003322F_f001770_3.24_d0_s0.875 (3.24_20).jpg,3.24_20,3.24_20,0.66016685962677
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-210920-003322F_f001785_3.24_d0_s0.944 (3.24_20).jpg,3.24_20,3.24_20,0.8664681911468506
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-211321-003326F_f001110_3.24_d0_s0.777 (3.24_60).jpg,3.24_60,3.24_20,0.4908553659915924
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-211521-003328F_f001230_3.24_d0_s0.822 (3.24_80).jpg,3.24_80,3.24_80,0.3346545100212097
+/Users/elmanovsm/personal/cv/graduation/speed_test_roi/NO20260227-211521-003328F_f001245_3.24_d0_s0.874 (3.24_80).jpg,3.24_80,3.24_80,0.25333157181739807
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f007485_3.24_d0_s0.736 (3.24_40).jpg",3.24_40,3.24_60,0.483564168214798
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f008370_3.24_d0_s0.814 (3.24_40).jpg",3.24_40,4.7_20,0.12254538387060165
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f009420_3.24_d0_s0.915 (3.24_40).jpg",3.24_40,3.24_40,0.9999247789382935
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f009420_3.24_d1_s0.914 (3.24_40).jpg",3.24_40,3.24_40,0.9876178503036499
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f013035_3.24_d0_s0.953 (3.24_40).jpg",3.24_40,3.24_80,0.39139434695243835
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f022350_3.24_d0_s0.916 (3.24_90).jpg",3.24_90,3.24_80,0.5028883814811707
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f054630_3.24_d0_s0.703 (3.24_70).jpg",3.24_70,3.24_50,0.6887362003326416
+"/Users/elmanovsm/personal/cv/graduation/speed_test_roi/Дорога на Красную Поляну из Адлера (Сочи) на машине _ ноябрь 2020 - ЕЩЁ Самара (1080p, h264)_f060165_3.24_d0_s0.781 (3.24_50).jpg",3.24_50,3.24_30,0.41109371185302734

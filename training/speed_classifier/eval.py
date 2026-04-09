@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -23,17 +25,15 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-# Импорты сделаны с fallback, чтобы работало и так:
-# - python training/speed_classifier/train.py
-# - python -m training.speed_classifier.train
-try:
-    from training.speed_classifier.dataset import DatasetConfig, load_split_dataset
-    from training.speed_classifier.model import create_model
-    from training.speed_classifier.utils import pick_device
-except Exception:  # pragma: no cover
-    from dataset import DatasetConfig, load_split_dataset
-    from model import create_model
-    from utils import pick_device
+# Важно: чтобы работали импорты при запуске:
+#   python training/speed_classifier/eval.py
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from py_utils.device import pick_device
+from training.speed_classifier.dataset import DatasetConfig, load_split_dataset
+from training.speed_classifier.model import create_model
 
 
 # ============================================================
@@ -41,13 +41,13 @@ except Exception:  # pragma: no cover
 # ============================================================
 
 # Где лежит датасет (папки train/val/test внутри)
-DATA_DIR = "datasets/speed_cls_v4"
+DATA_DIR = "datasets/speed_cls_v6"
 
 # Какой сплит оценивать: 'val' или 'test'
 SPLIT = "test"
 
 # Какой чекпоинт оценивать
-CKPT_PATH = "training/speed_classifier/runs/run_1/best.pt"
+CKPT_PATH = "models/speed_classifier/run_1/best.pt"
 
 # Размер входа (должен совпадать с train.py)
 IMAGE_SIZE = 128

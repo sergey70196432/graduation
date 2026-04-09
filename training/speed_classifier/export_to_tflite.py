@@ -23,7 +23,9 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
+import numpy as np
 import torch
 
 # Импорты с fallback, чтобы работало и так:
@@ -42,11 +44,11 @@ except Exception:  # pragma: no cover
 # ============================================================
 
 # Откуда брать чекпоинт (обычно best.pt из папки run_<n>)
-CKPT_PATH = "training/speed_classifier/runs/run1/best.pt"
+CKPT_PATH = "models/speed_classifier/run_1/best.pt"
 
 # Папка датасета, где лежит labels.txt (источник истины порядка классов).
 # Если оставить пустым "", проверка рассинхрона будет пропущена.
-DATA_DIR = "datasets/speed_cls_v1"
+DATA_DIR = "datasets/speed_cls_v6"
 
 # Папка, куда сложить артефакты экспорта.
 # Если оставить пустым "", то будет "<папка_чекпоинта>/export".
@@ -113,7 +115,10 @@ def export_onnx(ckpt_path: str, out_onnx: str, image_size: int, opset: int) -> l
         # Важно для onnx2tf: лучше один .onnx без external data,
         # иначе часть тулов плохо подхватывает initializers.
         external_data=False,
-        dynamic_axes=None,
+        # Делаем batch-ось динамической.
+        # Это полезно для onnx2tf: иначе он пытается скачать "test image data" для валидации,
+        # что в некоторых окружениях ломается (битый download/прокси/ограничения).
+        dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}},
     )
 
     return [str(x) for x in classes]
@@ -122,18 +127,39 @@ def export_onnx(ckpt_path: str, out_onnx: str, image_size: int, opset: int) -> l
 def run_onnx2tf(onnx_path: str, saved_model_dir: str):
     ensure_dir(saved_model_dir)
 
-    # ВАЖНО: используем тот же Python, которым запущен этот скрипт (venv),
-    # иначе можно случайно подхватить глобальный onnx2tf (pyenv shim) с другими зависимостями.
-    cmd = [sys.executable, "-m", "onnx2tf", "-i", onnx_path, "-o", saved_model_dir]
+    # ВАЖНО:
+    # onnx2tf и его зависимости часто "капризные", поэтому лучше запускать конвертацию
+    # в одном и том же виртуальном окружении проекта.
+    #
+    # Даже если этот скрипт случайно запустили глобальным `python`,
+    # мы всё равно попробуем использовать `<repo>/.venv/bin/python` для onnx2tf.
+    repo_root = Path(__file__).resolve().parents[2]
+    venv_py = repo_root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    py = str(venv_py) if venv_py.exists() else sys.executable
+
+    # onnx2tf внутри иногда пытается скачать "calibration/test data" с GitHub.
+    # В некоторых окружениях это ломается (битый download/прокси/ограничения), и конвертация падает.
+    # Поэтому заранее кладём корректный .npy рядом с SavedModel и запускаем onnx2tf с cwd=saved_model_dir.
+    #
+    # См. onnx2tf/utils/common_functions.py -> download_test_image_data()
+    calib_name = "calibration_image_sample_data_20x128x128x3_float32.npy"
+    calib_path = os.path.join(saved_model_dir, calib_name)
+    if not os.path.isfile(calib_path):
+        rng = np.random.default_rng(1337)
+        dummy = rng.random((20, 128, 128, 3), dtype=np.float32)
+        np.save(calib_path, dummy)
+
+    # -nuo / --not_use_onnxsim: onnxsim иногда падает с SIGSEGV на macOS.
+    cmd = [py, "-m", "onnx2tf", "-i", onnx_path, "-o", saved_model_dir, "-nuo"]
 
     # onnx2tf иногда вызывает внешние бинарники (onnxsim и т.п.).
     # Убедимся, что PATH содержит bin текущего интерпретатора (venv).
     env = os.environ.copy()
-    py_bin = os.path.dirname(os.path.abspath(sys.executable))
+    py_bin = os.path.dirname(os.path.abspath(py))
     env["PATH"] = py_bin + os.pathsep + env.get("PATH", "")
 
     print("[run]", " ".join(cmd))
-    res = subprocess.run(cmd, check=False, env=env)
+    res = subprocess.run(cmd, check=False, env=env, cwd=str(saved_model_dir))
     if res.returncode != 0:
         raise RuntimeError(f"onnx2tf упал с кодом {res.returncode}")
 

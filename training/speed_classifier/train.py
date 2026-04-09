@@ -18,26 +18,28 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import sys
 import time
 from dataclasses import asdict
 from contextlib import nullcontext
+from pathlib import Path
 
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Импорты сделаны с fallback, чтобы работало и так:
-# - python training/speed_classifier/train.py
-# - python -m training.speed_classifier.train
-try:
-    from training.speed_classifier.dataset import DatasetConfig, load_split_dataset, read_labels_txt
-    from training.speed_classifier.model import create_model
-    from training.speed_classifier.utils import pick_device
-except Exception:  # pragma: no cover
-    from dataset import DatasetConfig, load_split_dataset, read_labels_txt
-    from model import create_model
-    from utils import pick_device
+# Важно: чтобы работали импорты при запуске:
+#   python training/speed_classifier/train.py
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from py_utils.device import pick_device
+from training.speed_classifier.dataset import DatasetConfig, load_split_dataset, read_labels_txt
+from training.speed_classifier.model import create_model
 
 
 # ============================================================
@@ -46,11 +48,11 @@ except Exception:  # pragma: no cover
 
 # Где лежит датасет (папки train/val/test внутри).
 # Обычно генерируется скриптом make_dataset/generate_speed_classifier_dataset.py
-DATA_DIR = "datasets/speed_cls_v5"
+DATA_DIR = "datasets/speed_cls_v7"
 
 # Папка, куда складываются все запуски обучения.
 # Каждый новый запуск автоматически создаёт подпапку run_<n> (run_1, run_2, ...).
-RUNS_ROOT = "training/speed_classifier/runs"
+RUNS_ROOT = "models/speed_classifier"
 
 # Если нужно переобучить "в ту же папку" или задать своё имя — укажите явно:
 # - "" / None  : авто-выбор следующего номера run_<n>
@@ -61,6 +63,11 @@ RUN_NAME = ""
 # Размер входа модели.
 # В dataset.py все изображения приводятся к квадрату IMAGE_SIZE x IMAGE_SIZE.
 IMAGE_SIZE = 128
+
+# Пресет аугментаций для train:
+# - "default" : базовые аугментации
+# - "roi"     : усиленный пресет под реальные ROI/видео-кропы
+TRAIN_AUG_PRESET = "roi"
 
 # Параметры обучения:
 # - EPOCHS: сколько эпох
@@ -85,6 +92,11 @@ DEVICE = pick_device()
 # Поэтому включаем "умно": точно включаем на CUDA, на MPS пробуем, иначе выключаем.
 USE_AMP = True
 
+# Пытаемся сделать обучение максимально воспроизводимым.
+# На MPS/CUDA это не всегда гарантирует бит-в-бит одинаковый результат,
+# но заметно снижает разброс между запусками.
+DETERMINISTIC = True
+
 # Предобученные веса ImageNet:
 # - True  : лучше старт, но нужно скачать веса (интернет/кеш)
 # - False : без скачивания, проще повторять
@@ -96,9 +108,33 @@ def _set_seed(seed: int):
     Фиксируем сиды. Это не гарантирует 100% детерминизм (особенно на GPU),
     но заметно снижает разброс результатов между запусками.
     """
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+    if bool(DETERMINISTIC):
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass
+        if hasattr(torch.backends, "cudnn"):
+            try:
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+            except Exception:
+                pass
+
+
+def _seed_worker(worker_id: int):
+    """
+    Отдельно сидируем каждый DataLoader worker, чтобы random/numpy аугментации
+    были воспроизводимыми при NUM_WORKERS > 0.
+    """
+    worker_seed = torch.initial_seed() % (2**32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
 
 
 def make_autocast(device: torch.device):
@@ -220,21 +256,27 @@ def main():
     else:
         out_dir = _pick_next_run_dir(str(RUNS_ROOT))
 
-    # Конфиг датасета (важен image_size и Normalize в dataset.py).
-    cfg = DatasetConfig(data_dir=str(DATA_DIR), image_size=int(IMAGE_SIZE))
+    # Конфиг датасета:
+    # - train использует выбранный пресет аугментаций
+    # - val/test всегда детерминированные (без train-only аугментаций)
+    cfg_train = DatasetConfig(data_dir=str(DATA_DIR), image_size=int(IMAGE_SIZE), aug_preset=str(TRAIN_AUG_PRESET))
+    cfg_eval = DatasetConfig(data_dir=str(DATA_DIR), image_size=int(IMAGE_SIZE), aug_preset="default")
     # labels.txt теперь используется как источник истины для порядка классов (см. dataset.py).
-    labels = read_labels_txt(cfg.data_dir)
+    labels = read_labels_txt(cfg_train.data_dir)
 
     # Загружаем датасеты.
-    train_ds = load_split_dataset(cfg, "train")
-    val_ds = load_split_dataset(cfg, "val") if os.path.isdir(os.path.join(cfg.data_dir, "val")) else None
-    test_ds = load_split_dataset(cfg, "test") if os.path.isdir(os.path.join(cfg.data_dir, "test")) else None
+    train_ds = load_split_dataset(cfg_train, "train")
+    val_ds = load_split_dataset(cfg_eval, "val") if os.path.isdir(os.path.join(cfg_eval.data_dir, "val")) else None
+    test_ds = load_split_dataset(cfg_eval, "test") if os.path.isdir(os.path.join(cfg_eval.data_dir, "test")) else None
 
     # Количество классов берём из датасета (он уже построен с class_to_idx из labels.txt).
     num_classes = len(train_ds.classes)
     if labels and len(labels) != num_classes:
         # В норме это не должно происходить, потому что load_split_dataset использует labels.txt.
         print("[WARN] labels.txt size != dataset classes size:", len(labels), num_classes)
+
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(int(SEED))
 
     train_loader = DataLoader(
         train_ds,
@@ -244,6 +286,8 @@ def main():
         # pin_memory имеет смысл в основном для CUDA. На MPS будет warning, поэтому выключаем.
         pin_memory=(device.type == "cuda"),
         drop_last=False,
+        worker_init_fn=_seed_worker,
+        generator=loader_generator,
     )
     val_loader = (
         DataLoader(
@@ -252,6 +296,7 @@ def main():
             shuffle=False,
             num_workers=int(NUM_WORKERS),
             pin_memory=(device.type == "cuda"),
+            worker_init_fn=_seed_worker,
         )
         if val_ds is not None
         else None
@@ -263,6 +308,7 @@ def main():
             shuffle=False,
             num_workers=int(NUM_WORKERS),
             pin_memory=(device.type == "cuda"),
+            worker_init_fn=_seed_worker,
         )
         if test_ds is not None
         else None
@@ -292,8 +338,11 @@ def main():
                     "SEED": SEED,
                     "DEVICE": DEVICE,
                     "PRETRAINED": PRETRAINED,
+                    "TRAIN_AUG_PRESET": TRAIN_AUG_PRESET,
+                    "DETERMINISTIC": DETERMINISTIC,
                 },
-                "dataset": asdict(cfg),
+                "dataset_train": asdict(cfg_train),
+                "dataset_eval": asdict(cfg_eval),
                 "classes": train_ds.classes,
             },
             f,
@@ -363,12 +412,12 @@ def main():
             if acc1 > best_acc1:
                 best_acc1 = acc1
                 torch.save(
-                    {"model": model.state_dict(), "classes": train_ds.classes, "image_size": cfg.image_size},
+                    {"model": model.state_dict(), "classes": train_ds.classes, "image_size": cfg_train.image_size},
                     best_path,
                 )
 
         torch.save(
-            {"model": model.state_dict(), "classes": train_ds.classes, "image_size": cfg.image_size},
+            {"model": model.state_dict(), "classes": train_ds.classes, "image_size": cfg_train.image_size},
             last_path,
         )
 

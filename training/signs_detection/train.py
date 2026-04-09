@@ -80,13 +80,8 @@ STABLE_BEST_PATH = PROJECT_DIR / "signs_detector_best.pt"
 MODEL_INFO_PATH = PROJECT_DIR / "signs_detector_info.txt"
 
 # Устройство (cuda / mps / cpu). По умолчанию выбираем лучшее доступное.
-# Импорт с fallback, чтобы работало и так:
-# - python training/signs_detection/train.py
-# - python -m training.signs_detection.train
-try:
-    from training.utils import pick_device
-except Exception:  # pragma: no cover
-    from utils import pick_device  # type: ignore
+# Выбор устройства вынесен в общий модуль, т.к. используется в разных training-скриптах.
+from py_utils.device import pick_device
 
 DEVICE = pick_device()
 
