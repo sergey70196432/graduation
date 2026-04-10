@@ -6,14 +6,19 @@
 ### Артефакты и скрипты
 
 - `make_dataset/generate_speed_classifier_dataset.py`
-  - генерирует датасет `datasets/speed_cls_v1/`
+  - генерирует датасет `datasets/speed_cls_v<n>/`
   - пишет `labels.txt` (порядок классов!)
+  - пишет `stats.txt` с параметрами генерации и статистикой по real ROI
 - `training/speed_classifier/train.py`
   - обучает модель
-  - каждый запуск складывает артефакты в новую папку `training/speed_classifier/runs/run_<n>/`
+  - каждый запуск складывает артефакты в новую папку `models/speed_classifier/run_<n>/`
 - `training/speed_classifier/eval.py`
   - делает confusion matrix
   - пишет `predictions_*.csv` (по каждому изображению: true/pred/conf/path)
+- `eval_speed_classifier_on_rois.ipynb`
+  - прогоняет модель по real ROI holdout-набору
+  - читает `speed_test_roi/roi_index_test.jsonl`
+  - пишет `speed_test_roi/roi_predictions_test.csv`
 - `training/speed_classifier/export_to_tflite.py`
   - экспорт PyTorch → ONNX → onnx2tf → TFLite
   - рядом кладёт `labels.txt`
@@ -48,20 +53,27 @@ pip install -r training/speed_classifier/requirements_convert.txt
 python make_dataset/generate_speed_classifier_dataset.py
 ```
 
-Скрипт возьмёт PNG-кропы знаков (прозрачный фон) и соберёт датасет в `datasets/speed_cls_v1/`.
-Все параметры генерации (размер, аугментации, количество копий, bad-crops) находятся **вверху файла**.
+Скрипт возьмёт PNG-кропы знаков (прозрачный фон) и соберёт новую версию датасета в `datasets/speed_cls_v<n>/`.
+Все параметры генерации находятся **вверху файла**: размеры, сплиты, количество копий, bad-crops, реальные фоны и подмешивание real ROI в train.
 
 На выходе будет:
 
-- `datasets/speed_cls_v1/train/...`
-- `datasets/speed_cls_v1/val/...` (если включено)
-- `datasets/speed_cls_v1/test/...` (если включено)
-- `datasets/speed_cls_v1/labels.txt`
+- `datasets/speed_cls_v<n>/train/...`
+- `datasets/speed_cls_v<n>/val/...` (если включено)
+- `datasets/speed_cls_v<n>/test/...` (если включено)
+- `datasets/speed_cls_v<n>/labels.txt`
+- `datasets/speed_cls_v<n>/stats.txt`
 
 Важно: `labels.txt` — это **источник истины для порядка классов**.
 
 Скрипты обучения/оценки читают `labels.txt` и строят `class_to_idx` строго по нему.
 Это защищает от рассинхрона (когда индексы классов “едут” из-за сортировки папок).
+
+Текущий генератор также умеет:
+
+- использовать реальные дорожные фоны вместо однотонного;
+- создавать более жёсткие `bad crop`-примеры под video/ROI-сценарий;
+- подмешивать реальные ROI только в **train**-часть через `speed_test_roi/roi_index_train.jsonl`, чтобы не было утечки в честную оценку.
 
 ---
 
@@ -72,12 +84,13 @@ python training/speed_classifier/train.py
 ```
 
 Вверху `train.py` находятся параметры (epochs, batch size, lr, device, AMP, pretrained и т.п.).
+По умолчанию для train используется усиленный пресет `TRAIN_AUG_PRESET = "roi"`, а также включены дополнительные меры воспроизводимости (`SEED`, deterministic seed setup, seeded DataLoader workers).
 
 #### Куда сохраняется обучение
 
 Каждый запуск создаёт новую папку:
 
-`training/speed_classifier/runs/run_1/`, `run_2/`, ...
+`models/speed_classifier/run_1/`, `run_2/`, ...
 
 Внутри:
 
@@ -106,6 +119,24 @@ python training/speed_classifier/eval.py
 - `confusion_<split>.png`
 - `confusions_<split>.txt` (самые частые ошибки)
 - `predictions_<split>.csv` (по каждому файлу: true/pred/conf)
+
+---
+
+### Шаг 3.1. Оценить качество на real ROI без утечки
+
+Для отдельной проверки на реальных ROI используйте ноутбук:
+
+```bash
+jupyter notebook eval_speed_classifier_on_rois.ipynb
+```
+
+Текущая схема такая:
+
+- в обучение подмешивается только `speed_test_roi/roi_index_train.jsonl`;
+- оценка считается только по `speed_test_roi/roi_index_test.jsonl`;
+- результаты пишутся в `speed_test_roi/roi_predictions_test.csv`.
+
+Важно: не считайте итоговую accuracy по ROI, которые были подмешаны в train, иначе метрика будет завышена.
 
 ---
 

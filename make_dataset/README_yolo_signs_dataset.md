@@ -40,6 +40,9 @@ python -m pip install -r make_dataset/requirements.txt
 - `make_dataset/dashcam_frames` — кадры видеорегистратора (ищутся **рекурсивно**)
 - `make_dataset/backgrounds` — дополнительные фоны (ищутся **не рекурсивно**)
 
+Важно: папку `make_dataset/dashcam_frames` нужно скачать отдельно с Яндекс.Диска и распаковать в `make_dataset/`.
+Ссылка: [dashcam_frames](https://disk.yandex.ru/d/VyC2czLyajINLw)
+
 ### 4) Внешний YOLO‑датасет (опционально)
 Папка: `cfg.EXTERNAL_DATASET_DIR`
 
@@ -47,6 +50,9 @@ python -m pip install -r make_dataset/requirements.txt
 
 ### 5) Негативные изображения (кадры без знаков)
 Папка: `make_dataset/negative` (или `cfg.NEGATIVE_IMAGES_DIR`)
+
+Важно: папку `make_dataset/negative` нужно скачать отдельно с Яндекс.Диска и распаковать в `make_dataset/`.
+Ссылка: [negative](https://disk.yandex.ru/d/gz2vv16C3n4BmA)
 
 ---
 

@@ -32,6 +32,11 @@ python -m pip install -r training/signs_detection/requirements.txt
 python make_dataset/generate_synth_yolo_dataset.py
 ```
 
+Перед этим нужно отдельно скачать папки `make_dataset/dashcam_frames` и `make_dataset/negative` с Яндекс.Диска и распаковать их в `make_dataset/`.
+Ссылка: 
+- [dashcam_frames](https://disk.yandex.ru/d/VyC2czLyajINLw)
+- [negative](https://disk.yandex.ru/d/gz2vv16C3n4BmA)
+
 Скрипт создаст новую версию датасета вида `datasets/dataset_<n>/` и положит туда:
 
 - `images/`, `labels/`
