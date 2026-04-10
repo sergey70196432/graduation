@@ -165,7 +165,9 @@ BG_MAX_SIDE_FOR_CACHE = 1280
 # Добавление реальных ROI в train поверх синтетики.
 # Это позволяет уменьшить доменный сдвиг, сохранив ту же 105-классовую постановку.
 INCLUDE_REAL_ROI_IN_TRAIN = True
-REAL_ROI_INDEX_JSONL = "speed_test_roi/roi_index.jsonl"
+# ВАЖНО: чтобы не было утечки в оценке, используем ТОЛЬКО train-часть ROI.
+# Ожидается, что файл подготовлен скриптом split (roi_index_train.jsonl / roi_index_test.jsonl).
+REAL_ROI_INDEX_JSONL = "speed_test_roi/roi_index_train.jsonl"
 # 1 = один раз добавить каждый ROI, 40 = агрессивный overweight реальных примеров.
 REAL_ROI_REPEAT = 40
 
