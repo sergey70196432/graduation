@@ -22,10 +22,10 @@ CSV_PATH = "shared/signs/signs.csv"       # CSV: filename,class_id,class_name
 
 # ===================== Выход =====================
 OUTPUT_BASE = "datasets/dataset"  # папки будут dataset_1, dataset_2, ...
-MIN_IMAGES_PER_CLASS = 200         # минимум экземпляров (bbox) на класс
+MIN_IMAGES_PER_CLASS = 500        # минимум экземпляров (bbox) на класс
 VAL_RATIO = 0.2                   # доля val (для train.txt/val.txt)
 WEATHER_PROB = 0.7                # вероятность погодного эффекта на кадре
-RANDOM_SEED = 1337                # фиксируем seed для воспроизводимости
+RANDOM_SEED = 48                  # фиксируем seed для воспроизводимости
 
 # Если список пустой — генерируем все классы из CSV.
 # Если указать, например [0, 4, 10], то будут использоваться только эти class_id.
@@ -33,13 +33,13 @@ SELECT_CLASS_IDS = []  # пример: [0, 4, 10]
 
 # ===================== Внешний датасет (YOLO) =====================
 EXTERNAL_MIX_ENABLED = True
-EXTERNAL_DATASET_DIR = "make_dataset\\external_dataset\\Road Sign.v6"
+EXTERNAL_DATASET_DIR = "make_dataset\\external_dataset\\Road Sign.v8"
 EXTERNAL_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 # ===================== Геометрия / аугментации =====================
 # Для видеорегистратора знаки чаще маленькие, поэтому диапазон обычно ниже.
-SCALE_RANGE = (0.05, 0.5)         # ширина знака как доля ширины фона
-SCALE_BIAS_POWER = 2.2            # >1 => чаще маленькие (u**power)
+SCALE_RANGE = (0.08, 0.4)         # ширина знака как доля ширины фона
+SCALE_BIAS_POWER = 5              # >1 => чаще маленькие (u**power)
 ROLL_ANGLE_RANGE = (-40.0, 40.0)  # поворот в плоскости
 PERSPECTIVE_STRENGTH = 0.10       # перспектива (наклон)
 SHIFT_FRACTION = 0.08             # небольшой сдвиг после преобразований
@@ -56,17 +56,16 @@ NEGATIVE_ENABLED = True
 
 # Доля негативных изображений в ИТОГОВОМ датасете (0..1):
 # neg / (pos + neg) ~= NEGATIVE_RATIO
-NEGATIVE_RATIO = 0.0
+NEGATIVE_RATIO = 0.3
 
 # Папка с готовыми негативными изображениями
 NEGATIVE_IMAGES_DIR = "make_dataset/negative"
 NEGATIVE_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-
 # Несколько знаков на одном изображении
 MULTI_OBJECT_ENABLED = True
 EXTRA_OBJECTS_RANGE = (0, 2)       # сколько ДОП. знаков добавлять к основному
 EXTRA_SAME_CLASS_PROB = 0.1        # шанс, что доп. знак будет того же класса
-MAX_IOU_BETWEEN_SIGNS = 0.3        # ограничение пересечений bbox между знаками
+MAX_IOU_BETWEEN_SIGNS = 0.2        # ограничение пересечений bbox между знаками
 # IoU не ловит ситуацию, когда большой знак полностью закрывает маленький (IoU может быть маленьким).
 # Поэтому добавляем ограничение на долю перекрытия относительно меньшего bbox:
 # intersection / min(area1, area2) <= MAX_IO_MINAREA_BETWEEN_SIGNS

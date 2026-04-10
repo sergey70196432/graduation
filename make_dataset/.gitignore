@@ -1,0 +1,5 @@
+dashcam_frames/*
+!dashcam_frames/.gitkeep
+
+negative/*
+!negative/.gitkkep

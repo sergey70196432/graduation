@@ -212,12 +212,12 @@ def generate_dataset():
                             if val_list is not None:
                                 val_list.append(rel_img_path)
                             elif val_f is not None:
-                                val_f.write(rel_img_path + "\n")
+                                val_f.write("./" + rel_img_path + "\n")
                         else:
                             if train_list is not None:
                                 train_list.append(rel_img_path)
                             elif train_f is not None:
-                                train_f.write(rel_img_path + "\n")
+                                train_f.write("./" + rel_img_path + "\n")
 
                         for (cid, xc, yc, ww, hh) in labels:
                             cid_i = int(cid)
@@ -257,12 +257,12 @@ def generate_dataset():
                     if val_list is not None:
                         val_list.append(rel_img_path)
                     elif val_f is not None:
-                        val_f.write(rel_img_path + "\n")
+                        val_f.write("./" + rel_img_path + "\n")
                 else:
                     if train_list is not None:
                         train_list.append(rel_img_path)
                     elif train_f is not None:
-                        train_f.write(rel_img_path + "\n")
+                        train_f.write("./" + rel_img_path + "\n")
 
                 for (cid, xc, yc, ww, hh) in labels:
                     cid_i = int(cid)

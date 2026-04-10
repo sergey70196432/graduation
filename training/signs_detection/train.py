@@ -51,7 +51,7 @@ if str(REPO_ROOT) not in sys.path:
 
 # Путь к датасету Ultralytics (dataset.yaml).
 # Обычно генерируется скриптом make_dataset/generate_synth_yolo_dataset.py
-DATASET_YAML = Path("datasets/dataset_9/dataset.yaml")
+DATASET_YAML = Path("datasets/dataset_17/dataset.yaml")
 
 # Предобученные веса (COCO). Скачиваются Ultralytics автоматически при первом запуске.
 MODEL_PRETRAINED = "yolov8n.pt"
@@ -67,9 +67,12 @@ SEED = 1337
 # Аугментации (Ultralytics):
 AUGMENT = True
 COS_LR = True
-MIXUP = 0.2
 DEGREES = 5.0
 SCALE = 0.5
+MOSAIC = 1.0
+SAVE_PERIOD=5
+CLS=1.5
+FLIPLR=0
 
 # Куда сохранять артефакты Ultralytics:
 PROJECT_DIR = Path("models/signs_detection")
@@ -267,9 +270,12 @@ def main() -> None:
         save=True,
         plots=True,
         cos_lr=COS_LR,
-        mixup=MIXUP,
         degrees=DEGREES,
         scale=SCALE,
+        mosaic=MOSAIC,
+        save_period=SAVE_PERIOD,
+        fliplr=FLIPLR,
+        cls=CLS,
         device=DEVICE,
     )
     print("[INFO] Обучение завершено.")

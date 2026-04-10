@@ -257,11 +257,11 @@ def write_dataset_yaml_and_splits(out_dir, classes, train_list, val_list):
     if train_list is not None:
         with open(train_txt, "w", encoding="utf-8") as f:
             for p in train_list:
-                f.write(p + "\n")
+                f.write("./" + p + "\n")
     if val_list is not None:
         with open(val_txt, "w", encoding="utf-8") as f:
             for p in val_list:
-                f.write(p + "\n")
+                f.write("./" + p + "\n")
 
     max_id = max(int(c["class_id"]) for c in classes)
     names = [""] * (max_id + 1)
@@ -273,7 +273,7 @@ def write_dataset_yaml_and_splits(out_dir, classes, train_list, val_list):
 
     yaml_path = os.path.join(out_dir, "dataset.yaml")
     with open(yaml_path, "w", encoding="utf-8") as f:
-        f.write("path: .\n")
+        f.write(f"path: {out_dir}\n")
         f.write("train: train.txt\n")
         f.write("val: val.txt\n")
         f.write(f"nc: {len(names)}\n")
@@ -1162,12 +1162,12 @@ def import_external_images_for_selected(
             if val_list is not None:
                 val_list.append(rel_img_path)
             elif val_f is not None:
-                val_f.write(rel_img_path + "\n")
+                val_f.write("./" + rel_img_path + "\n")
         else:
             if train_list is not None:
                 train_list.append(rel_img_path)
             elif train_f is not None:
-                train_f.write(rel_img_path + "\n")
+                train_f.write("./" + rel_img_path + "\n")
 
         for (cid, xc, yc, w, h) in labels:
             imported_class_ids.add(int(cid))
@@ -1229,12 +1229,12 @@ def import_negative_images(
             if val_list is not None:
                 val_list.append(rel_img_path)
             elif val_f is not None:
-                val_f.write(rel_img_path + "\n")
+                val_f.write("./" + rel_img_path + "\n")
         else:
             if train_list is not None:
                 train_list.append(rel_img_path)
             elif train_f is not None:
-                train_f.write(rel_img_path + "\n")
+                train_f.write("./" + rel_img_path + "\n")
 
         added += 1
 

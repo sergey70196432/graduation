@@ -178,7 +178,7 @@ def figure9_histogram(dataset_dir: str, out_path: str, dpi: int = 200) -> None:
     ax.axhline(mean_val, color="crimson", linestyle="--", linewidth=1.2, label=f"Среднее: {mean_val:.1f}")
     ax.set_xlabel("Номер класса")
     ax.set_ylabel("Количество изображений")
-    ax.set_title("Баланс классо")
+    ax.set_title("Баланс классов")
     ax.set_xlim(0.5, num_classes + 0.5)
     ax.legend(loc="upper right")
     fig.tight_layout()
@@ -188,7 +188,7 @@ def figure9_histogram(dataset_dir: str, out_path: str, dpi: int = 200) -> None:
 
 def figure10_real_examples(out_path: str, dpi: int = 200) -> None:
     """Рисунок 10: кадры видеорегистратора (real_frames или dashcam_frames)."""
-    real_dir = "make_dataset/external_dataset/Road Sign-3/train/images"
+    real_dir = "make_dataset/external_dataset/Road Sign.v8/train/images"
     if os.path.isdir(real_dir) and utils.list_files_by_ext_recursive(real_dir, cfg.BACKGROUND_EXTS):
         frames = utils.list_files_by_ext_recursive(real_dir, cfg.BACKGROUND_EXTS)
         caption_note = "реальный кадр"
