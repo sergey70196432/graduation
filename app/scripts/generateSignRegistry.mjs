@@ -8,10 +8,15 @@ import path from 'node:path';
 
 const appDir = path.resolve(import.meta.dirname, '..');
 const sharedImagesDir = path.resolve(appDir, '..', 'shared', 'signs', 'images');
+const sharedSplitsDir = path.resolve(appDir, '..', 'shared', 'signs', 'splits');
 const outFile = path.resolve(appDir, 'src', 'signs', 'signRegistry.tsx');
 
 function isSvg(name) {
   return name.toLowerCase().endsWith('.svg');
+}
+
+function isTempVariant(name) {
+  return name.toLowerCase().includes('_temp');
 }
 
 function toLabel(fileName) {
@@ -23,23 +28,69 @@ function toIdent(label) {
   return `Sign_${safe}`;
 }
 
+function collectSvgFilesRecursive(absDir, relPrefix = '') {
+  const out = [];
+  if (!fs.existsSync(absDir)) return out;
+
+  const items = fs.readdirSync(absDir, { withFileTypes: true });
+  for (const it of items) {
+    if (it.name.startsWith('.')) continue;
+    const abs = path.join(absDir, it.name);
+    const rel = relPrefix ? path.posix.join(relPrefix, it.name) : it.name;
+
+    if (it.isDirectory()) {
+      out.push(...collectSvgFilesRecursive(abs, rel));
+    } else if (it.isFile() && isSvg(it.name) && !isTempVariant(it.name)) {
+      out.push(rel);
+    }
+  }
+
+  return out;
+}
+
 if (!fs.existsSync(sharedImagesDir)) {
   console.error(`[generateSignRegistry] Folder not found: ${sharedImagesDir}`);
   process.exit(1);
 }
 
-const files = fs
+const imageFiles = fs
   .readdirSync(sharedImagesDir)
   .filter(isSvg)
   .sort((a, b) => a.localeCompare(b));
 
+// Вариации скоростных знаков: берём SVG из shared/signs/splits/<class_name>/...
+// Название файла: <class_name>_<value>.svg. Файлы с _temp игнорируем.
+const SPEED_BASES = ['3.24', '3.25', '4.6', '4.7', '5.31', '5.32', '6.2'];
+const speedVariantFiles = [];
+for (const base of SPEED_BASES) {
+  const dir = path.resolve(sharedSplitsDir, base);
+  const rels = collectSvgFilesRecursive(dir, base);
+  speedVariantFiles.push(...rels);
+}
+
 const imports = [];
 const entries = [];
 
-for (const file of files) {
+const seenLabels = new Set();
+
+for (const file of imageFiles) {
   const label = toLabel(file);
+  if (seenLabels.has(label)) continue;
+  seenLabels.add(label);
   const ident = toIdent(label);
   const relImport = `../../../shared/signs/images/${file}`;
+  imports.push(`import ${ident} from '${relImport}';`);
+  entries.push(`  '${label}': ${ident},`);
+}
+
+for (const relPath of speedVariantFiles.sort((a, b) => a.localeCompare(b))) {
+  const baseName = path.posix.basename(relPath);
+  const label = toLabel(baseName);
+  if (seenLabels.has(label)) continue;
+  seenLabels.add(label);
+
+  const ident = toIdent(label);
+  const relImport = `../../../shared/signs/splits/${relPath}`;
   imports.push(`import ${ident} from '${relImport}';`);
   entries.push(`  '${label}': ${ident},`);
 }
@@ -61,5 +112,7 @@ ${entries.join('\n')}
 
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
 fs.writeFileSync(outFile, content, 'utf8');
-console.log(`[generateSignRegistry] Wrote ${outFile} (${files.length} signs)`);
+console.log(
+  `[generateSignRegistry] Wrote ${outFile} (${imageFiles.length} base + ${speedVariantFiles.length} speed variants)`
+);
 

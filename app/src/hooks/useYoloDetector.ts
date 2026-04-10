@@ -211,7 +211,6 @@ export function useYoloDetector() {
         `# startedAt=${startedAtIso}`,
         `# inputSize=${activeYoloParams.inputSize}`,
         `# confidenceThreshold=${activeYoloParams.confidenceThreshold}`,
-        `# iouThreshold=${activeYoloParams.iouThreshold}`,
         `# preNmsTopK=${activeYoloParams.preNmsTopK}`,
         `# postNmsTopK=${activeYoloParams.postNmsTopK}`,
         `# platform=${Platform.OS}`,

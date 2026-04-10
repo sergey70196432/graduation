@@ -69,7 +69,6 @@ function normalizeRemoteModel(m: RemoteYoloModel): ModelListItem {
     ...(typeof m.description === 'string' ? { description: m.description } : {}),
     inputSize: m.inputSize ?? YOLO.inputSize,
     confidenceThreshold: m.confidenceThreshold ?? YOLO.confidenceThreshold,
-    iouThreshold: m.iouThreshold ?? YOLO.iouThreshold,
     preNmsTopK: m.preNmsTopK ?? YOLO.preNmsTopK,
     postNmsTopK: m.postNmsTopK ?? YOLO.postNmsTopK,
     isActive: false,
@@ -191,7 +190,6 @@ export function useYoloModel() {
     return {
       inputSize: m?.inputSize ?? YOLO.inputSize,
       confidenceThreshold: m?.confidenceThreshold ?? YOLO.confidenceThreshold,
-      iouThreshold: m?.iouThreshold ?? YOLO.iouThreshold,
       preNmsTopK: m?.preNmsTopK ?? YOLO.preNmsTopK,
       postNmsTopK: m?.postNmsTopK ?? YOLO.postNmsTopK,
     };

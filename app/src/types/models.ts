@@ -29,7 +29,6 @@ export type RemoteYoloModel = {
    * Если не задано — берём дефолты из `YOLO`.
    */
   confidenceThreshold?: number;
-  iouThreshold?: number;
   preNmsTopK?: number;
   postNmsTopK?: number;
 
@@ -49,7 +48,6 @@ export type ModelListItem = {
   description?: string;
   inputSize: number;
   confidenceThreshold: number;
-  iouThreshold: number;
   preNmsTopK: number;
   postNmsTopK: number;
 
