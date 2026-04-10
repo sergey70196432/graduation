@@ -48,7 +48,7 @@ from training.speed_classifier.model import create_model
 
 # Где лежит датасет (папки train/val/test внутри).
 # Обычно генерируется скриптом make_dataset/generate_speed_classifier_dataset.py
-DATA_DIR = "datasets/speed_cls_v1"
+DATA_DIR = "datasets/speed_cls_v3"
 
 # Папка, куда складываются все запуски обучения.
 # Каждый новый запуск автоматически создаёт подпапку run_<n> (run_1, run_2, ...).

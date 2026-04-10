@@ -44,11 +44,11 @@ except Exception:  # pragma: no cover
 # ============================================================
 
 # Откуда брать чекпоинт (обычно best.pt из папки run_<n>)
-CKPT_PATH = "models/speed_classifier/run_1/best.pt"
+CKPT_PATH = "models/speed_classifier/run_3/best.pt"
 
 # Папка датасета, где лежит labels.txt (источник истины порядка классов).
 # Если оставить пустым "", проверка рассинхрона будет пропущена.
-DATA_DIR = "datasets/speed_cls_v6"
+DATA_DIR = "datasets/speed_cls_v3"
 
 # Папка, куда сложить артефакты экспорта.
 # Если оставить пустым "", то будет "<папка_чекпоинта>/export".

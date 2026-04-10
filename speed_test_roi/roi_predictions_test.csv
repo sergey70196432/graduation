@@ -1,0 +1,27 @@
+roi_path,true_class_name,class_name,confidence
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f000315_3.24_d0_s0.873 (3.24_60).jpg,3.24_60,3.24_80,0.9057996869087219
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f000330_3.24_d0_s0.939 (3.24_60).jpg,3.24_60,3.24_80,0.9052863717079163
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f000585_3.24_d0_s0.953 (3.24_60).jpg,3.24_60,3.24_60,0.5805588960647583
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f001125_3.24_d0_s0.778(3.24_60).jpg,3.24_60,3.24_80,0.9714644551277161
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f001140_3.24_d0_s0.934 (3.24_60).jpg,3.24_60,3.24_80,0.8614124655723572
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f001155_3.24_d0_s0.931 (3.24_60).jpg,3.24_60,3.24_80,0.580633819103241
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092159-000347F_f001170_3.24_d0_s0.899 (3.24_60).jpg,3.24_60,3.24_80,0.7293269038200378
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092259-000348F_f001410_3.24_d0_s0.882 (3.24_80).jpg,3.24_80,3.24_80,0.9945259690284729
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260123-092259-000348F_f001425_3.24_d0_s0.947 (3.24_80).jpg,3.24_80,3.24_80,0.9604142904281616
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260128-155246-000805F_f000345_3.24_d0_s0.915 (3.24_80).jpg,3.24_80,3.24_60,0.7409207224845886
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260128-155246-000805F_f000360_3.24_d0_s0.848 (3.24_80).jpg,3.24_80,3.24_30,0.5298978686332703
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260128-155246-000805F_f000360_3.24_d1_s0.752 (3.24_80).jpg,3.24_80,3.24_80,0.9873422384262085
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260128-155246-000805F_f000375_3.24_d0_s0.896 (3.24_80).jpg,3.24_80,3.24_80,0.9768322110176086
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260219-135457-002494F_f000060_3.24_d0_s0.760 (3.24_40).jpg,3.24_40,3.24_30,0.3682495057582855
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260219-135457-002494F_f000075_3.24_d0_s0.875 (3.24_40).jpg,3.24_40,3.24_20,0.5015903115272522
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260219-135457-002494F_f000090_3.24_d0_s0.921 (3.24_40).jpg,3.24_40,3.24_30,0.9602077007293701
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260219-135457-002494F_f000255_3.24_d0_s0.777 (3.24_30).jpg,3.24_30,3.24_60,0.4831216335296631
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260219-135457-002494F_f000285_3.24_d0_s0.735 (3.24_30).jpg,3.24_30,3.24_30,0.49434608221054077
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260305-114109-004033F_f000690_3.24_d0_s0.773 (3.24_40).jpg,3.24_40,3.24_30,0.2847402095794678
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260305-114109-004033F_f000705_3.24_d0_s0.906 (3.24_40).jpg,3.24_40,3.24_40,0.3685094118118286
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260305-114109-004033F_f000720_3.24_d0_s0.932 (3.24_40).jpg,3.24_40,3.24_70,0.42040562629699707
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260305-114109-004033F_f001080_3.24_d0_s0.920 (3.24_40).jpg,3.24_40,3.24_70,0.5669946074485779
+C:\Users\Sergey\edu\graduation\speed_test_roi\EV20260305-114109-004033F_f001095_3.24_d0_s0.930 (3.24_40).jpg,3.24_40,3.24_70,0.6198590397834778
+C:\Users\Sergey\edu\graduation\speed_test_roi\NO20260227-110101-003260F_f001665_3.24_d0_s0.810 (3.24_30).jpg,3.24_30,3.24_30,0.9943345785140991
+C:\Users\Sergey\edu\graduation\speed_test_roi\NO20260227-173605-003270F_f000060_3.24_d0_s0.906 (3.24_30).jpg,3.24_30,3.24_30,0.9911983609199524
+C:\Users\Sergey\edu\graduation\speed_test_roi\NO20260227-173605-003270F_f000075_3.24_d0_s0.733 (3.24_30).jpg,3.24_30,3.24_30,0.9349470734596252

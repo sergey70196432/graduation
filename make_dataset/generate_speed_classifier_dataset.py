@@ -169,7 +169,7 @@ INCLUDE_REAL_ROI_IN_TRAIN = True
 # Ожидается, что файл подготовлен скриптом split (roi_index_train.jsonl / roi_index_test.jsonl).
 REAL_ROI_INDEX_JSONL = "speed_test_roi/roi_index_train.jsonl"
 # 1 = один раз добавить каждый ROI, 40 = агрессивный overweight реальных примеров.
-REAL_ROI_REPEAT = 40
+REAL_ROI_REPEAT = 10
 
 
 # ============================================================
